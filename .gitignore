@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.venv/
+
+# Runtime data — track directory structure only; ignore generated/secret contents
+data/*
+!data/.gitkeep
+media/*
+!media/.gitkeep
+
+# Secrets / local config
+.env
+samsung-tv-art.env
+*.env.local
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db

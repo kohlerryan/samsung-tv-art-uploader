@@ -1,0 +1,700 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Frame TV Art</title>
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <style>
+    /* Theme */
+    body {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, 'Fira Sans', 'Droid Sans', 'Helvetica Neue', Arial, sans-serif;
+      margin: 0;
+      background: #12100f; /* dark brown/gray */
+      color: #e9e4df;
+    }
+    .wrap {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 20px 20px 28px; /* add horizontal padding like top/bottom */
+      display: flex;
+      flex-direction: column;
+      align-items: center; /* center components */
+      gap: 16px;
+    }
+    /* Respect mobile safe areas (iOS notches) */
+    @supports (padding: max(0px)) {
+      body {
+        padding-left: max(0px, env(safe-area-inset-left));
+        padding-right: max(0px, env(safe-area-inset-right));
+      }
+    }
+    /* Ensure extra side padding on very small screens */
+    @media (max-width: 480px) {
+      .wrap { padding-left: 22px; padding-right: 22px; }
+    }
+    .card {
+      width: 100%;
+      max-width: 980px; /* ensure dynamic width on small screens */
+      background: #1e1a18; /* dark brown */
+      border: 1px solid #3a2f2a; /* subtle border */
+      border-radius: 12px;
+      padding: 16px;
+      box-shadow: 0 8px 20px rgba(0,0,0,0.35);
+      box-sizing: border-box; /* prevent padding/border from causing overflow */
+    }
+    h1 { font-size: 20px; margin: 0 0 12px; color: #f0ece6; }
+    .row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
+    .row > * { min-width: 0; }
+    select { flex: 1; padding: 10px; background: #2a2623; color: #f2eee9; border: 1px solid #4a3d37; border-radius: 8px; }
+    button { padding: 10px 12px; border-radius: 8px; border: 1px solid #5b4a44; background: #7e3935; color: #fff; cursor: pointer; }
+    button:hover { filter: brightness(1.06); }
+    button:disabled { opacity: 0.5; cursor: default; }
+    .hint { font-size: 12px; color: #b6aba4; margin-top: 6px; }
+    /* Larger selected text line */
+    #selHint { font-size: 14px; }
+
+    /* Always-visible artwork component */
+    .display-card h1 { margin-bottom: 8px; }
+    .info { margin-top: 6px; }
+    .title { font-size: 1.1em; letter-spacing: .5px; line-height: 1.3; }
+    .title .year { font-size: .9em; color: rgba(255,255,255,.7); }
+    .line { font-size: .9em; color: rgba(255,255,255,.7); line-height: 1.4; margin-top: 4px; }
+    .bg { margin-top: 12px; width: 100%; border-radius: 8px; background-color: #0d0c0b; overflow: hidden; border: 1px solid #3a2f2a; }
+    .bg img { width: 100%; height: auto; display: block; border-radius: 8px; }
+
+    /* Tabs styled like folder (pentaflex) tabs */
+    .tabbar { display: flex; gap: 6px; margin: 0 0 0 4px; }
+    .tab {
+      padding: 8px 14px;
+      background: #2a2623;
+      color: #d9d3cc;
+      border: 1px solid #4a3d37;
+      border-bottom: none;
+      border-top-left-radius: 10px;
+      border-top-right-radius: 10px;
+      cursor: pointer;
+      position: relative;
+      top: 1px; /* sit over content border */
+      user-select: none;
+    }
+    .tab:hover { background: #322d2a; }
+    .tab.active { background: #1e1a18; color: #f0ece6; border-color: #5b4a44; }
+    .tabcontent {
+      border: 1px solid #5b4a44;
+      border-radius: 0 12px 12px 12px;
+      padding: 14px;
+      background: #1e1a18;
+    }
+
+    /* Responsive layout to avoid horizontal overflow on phones */
+    @media (max-width: 600px) {
+      /* Stack controls in Control view */
+      #viewControl .row select { flex: 1 1 100%; }
+      #viewControl .row button { flex: 1 1 100%; }
+
+      /* Stack inputs in Settings view */
+      #viewSettings .row > * { flex: 1 1 100%; }
+
+      /* Allow tabs to wrap if needed */
+      .tabbar { flex-wrap: wrap; }
+    }
+
+    /* Dropdown multi-select styling (aligns with HA card visuals) */
+    .ftv-controls { border-radius: 8px; }
+    .ftv-row { display: flex; gap: 8px; align-items: stretch; }
+    .ftv-dropdown-wrap { flex: 1; position: relative; min-width: 0; }
+    .ftv-trigger { width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid #4a3d37; background: #2a2623; color: #f2eee9; cursor: pointer; display: flex; justify-content: space-between; align-items: center; box-sizing: border-box; }
+    .ftv-trigger:hover { border-color: #5b4a44; }
+    .ftv-trigger-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+    .ftv-trigger-arrow { margin-left: 8px; transition: transform 0.2s; }
+    .ftv-trigger.open .ftv-trigger-arrow { transform: rotate(180deg); }
+    .ftv-dropdown { display: none; position: absolute; top: 100%; left: 0; right: 0; margin-top: 4px; background: #1e1a18; border: 1px solid #4a3d37; border-radius: 8px; max-height: 260px; overflow-y: auto; z-index: 9999; box-shadow: 0 4px 12px rgba(0,0,0,0.3); color: #f2eee9; }
+    .ftv-controls { position: relative; }
+    .ftv-dropdown.open { display: block; }
+    .ftv-option { display: flex; align-items: center; padding: 10px 12px; cursor: pointer; gap: 10px; }
+    .ftv-option:hover { background: rgba(3, 169, 244, 0.08); }
+    .ftv-option.selected { background: rgba(3, 169, 244, 0.12); }
+    .ftv-checkbox { width: 20px; height: 20px; border: 2px solid #6b5a54; border-radius: 4px; display: flex; align-items: center; justify-content: center; }
+    .ftv-option.selected .ftv-checkbox { background: #2f7fbf; border-color: #2f7fbf; }
+    .ftv-checkbox svg { width: 14px; height: 14px; fill: white; opacity: 0; }
+    .ftv-option.selected .ftv-checkbox svg { opacity: 1; }
+    .ftv-apply, .ftv-clear { width: 40px; height: 40px; border: none; border-radius: 8px; display: flex; align-items: center; justify-content: center; }
+    .ftv-apply { background: #2f7fbf; }
+    .ftv-clear { background: #8b3a3a; }
+    .ftv-apply svg, .ftv-clear svg { width: 22px; height: 22px; fill: #fff; display: block; }
+    #refresh { width: 40px; height: 40px; border: none; border-radius: 8px; display: flex; align-items: center; justify-content: center; background: #4a6fa5; }
+    #refresh svg { width: 22px; height: 22px; fill: #fff; display: block; }
+
+    /* Mobile layout: place buttons below dropdown, side by side.
+       Ensure up to three controls (refresh/apply/clear) share the row equally. */
+    @media (max-width: 600px) {
+      #viewControl .ftv-row { flex-wrap: wrap; }
+      #viewControl .ftv-dropdown-wrap { flex: 1 1 100%; }
+      #viewControl #refresh,
+      #viewControl .ftv-apply,
+      #viewControl .ftv-clear {
+        /* Let buttons distribute evenly on the same line regardless of count */
+        flex: 1 1 0;
+        min-width: 0;
+        width: auto;
+        height: 44px;
+        margin-top: 6px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <!-- Control/Settings component with folder-style tabs -->
+    <div class="card control-card">
+      <div class="tabbar">
+        <div class="tab active" data-tab="control">Control</div>
+        <div class="tab" data-tab="settings">Settings</div>
+      </div>
+      <div class="tabcontent">
+        <div id="viewControl">
+          <h1>Frame TV Art</h1>
+          <div class="row">
+            <div class="ftv-controls" style="flex:1;">
+              <div class="ftv-row">
+                <div class="ftv-dropdown-wrap">
+                  <div class="ftv-trigger" id="ftv-trigger">
+                    <span class="ftv-trigger-text">Select collections...</span>
+                    <span class="ftv-trigger-arrow">▼</span>
+                  </div>
+                  <div class="ftv-dropdown" id="ftv-dropdown"></div>
+                </div>
+                <button id="refresh" class="ftv-apply" title="Refresh uploads">
+                  <svg viewBox="0 0 24 24"><path d="M12,6V9L16,5L12,1V4C7.58,4 4,7.58 4,12C4,13.85 4.63,15.55 5.69,16.88L7.1,15.47C6.41,14.53 6,13.32 6,12C6,8.69 8.69,6 12,6M18.31,7.12L16.9,8.53C17.59,9.47 18,10.68 18,12C18,15.31 15.31,18 12,18V15L8,19L12,23V20C16.42,20 20,16.42 20,12C20,10.15 19.37,8.45 18.31,7.12Z"/></svg>
+                </button>
+                <button class="ftv-apply" id="apply" title="Apply" disabled style="display:none;">
+                  <svg viewBox="0 0 24 24"><path d="M9,20.42L2.79,14.21L5.62,11.38L9,14.77L18.88,4.88L21.71,7.71L9,20.42Z"/></svg>
+                </button>
+                <button class="ftv-clear" id="clear" title="Clear" disabled style="display:none;">
+                  <svg viewBox="0 0 24 24"><path d="M9,3V4H4V6H5V19A2,2 0 0,0 7,21H17A2,2 0 0,0 19,19V6H20V4H15V3H9M7,6H17V19H7V6Z"/></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+          <!-- Removed per-request: selected hint below control; trigger now shows current selection -->
+        </div>
+        <div id="viewSettings" style="display:none;">
+          <h1>Settings</h1>
+          <div class="hint">MQTT WebSocket defaults come from env.json and persisted overrides; changes here are saved.</div>
+          <div class="row" style="margin-top:8px; align-items: stretch; gap: 6px;">
+            <input id="broker" placeholder="ws://host:9001" style="flex:2; padding:10px; background:#2a2623; color:#f2eee9; border:1px solid #4a3d37; border-radius:8px;" />
+            <input id="user" placeholder="username (optional)" style="flex:1; padding:10px; background:#2a2623; color:#f2eee9; border:1px solid #4a3d37; border-radius:8px;" />
+            <input id="pass" type="password" placeholder="password (optional)" style="flex:1; padding:10px; background:#2a2623; color:#f2eee9; border:1px solid #4a3d37; border-radius:8px;" />
+            <button id="connect">Connect</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Always-visible artwork component -->
+    <div class="card display-card">
+      <div class="info" id="info"></div>
+      <div class="bg" id="bg"></div>
+    </div>
+  </div>
+  <script>
+    // Settings helpers (localStorage + query param override)
+    const qs = new URLSearchParams(location.search);
+    async function loadEnvDefaults() {
+      // Load baked defaults generated by start.sh
+      let env = {};
+      try {
+        const res = await fetch('/app/www/env.json', { cache: 'no-store' });
+        if (res.ok) env = await res.json();
+      } catch (_) { /* ignore */ }
+      // Overlay with any server-persisted UI MQTT prefs (from /data)
+      try {
+        const res2 = await fetch('/api/ui-mqtt', { cache: 'no-store' });
+        if (res2.ok) {
+          const j2 = await res2.json();
+          if (j2 && (j2.broker || j2.username || j2.password)) {
+            env = { ...env, ...j2 };
+          }
+        }
+      } catch (_) { /* ignore */ }
+      return env || {};
+    }
+    function loadSettings(env = {}) {
+      const defBroker = env.broker || `ws://${location.hostname}:9001`;
+      const s = {
+        broker: qs.get('broker') || localStorage.getItem('ftv_broker') || defBroker,
+        username: qs.get('username') || localStorage.getItem('ftv_username') || env.username || '',
+        password: qs.get('password') || localStorage.getItem('ftv_password') || env.password || '',
+      };
+      return s;
+    }
+    function saveSettings(b, u, p) {
+      localStorage.setItem('ftv_broker', b || '');
+      localStorage.setItem('ftv_username', u || '');
+      localStorage.setItem('ftv_password', p || '');
+    }
+
+    let client = null;
+    function connectMqtt(broker, username, password) {
+      try { if (client) client.end(true); } catch (_) {}
+      client = mqtt.connect(broker, { username, password });
+      client.on('connect', () => {
+        client.subscribe([TOPIC_ATTR, TOPIC_STATE, TOPIC_COLL_ATTR, TOPIC_SELECTED, TOPIC_SETTINGS_ATTR, `${TOPIC_ACK_PREFIX}/#`]);
+      });
+      client.on('message', (topic, payload) => {
+        try {
+          if (topic === TOPIC_COLL_ATTR) {
+            const data = JSON.parse(payload.toString() || '{}');
+            options = (data.options || []).filter(o => o !== '@eaDir');
+            if (!staged.length) staged = baseline.slice();
+            renderOptions();
+            updateButtons();
+            syncTriggerText();
+          }
+          if (topic === TOPIC_ATTR) {
+            const attrs = JSON.parse(payload.toString() || '{}');
+            lastAttrs = attrs;
+            setInfo(attrs);
+          }
+          if (topic === TOPIC_SETTINGS_ATTR) {
+            const attrs = JSON.parse(payload.toString() || '{}');
+            loadEnvFromMqtt(attrs);
+          }
+          if (topic.startsWith(`${TOPIC_ACK_PREFIX}/`)) {
+            try {
+              const ack = JSON.parse(payload.toString() || '{}');
+              const cmd = (ack && ack.cmd) || '';
+              const status = (ack && ack.status) || '';
+              if (cmd === 'settings/set') {
+                $envMsg.textContent = status === 'ok' ? 'Settings applied.' : `Settings error: ${ack.message||'unknown'}`;
+              }
+              if (cmd === 'settings/restart') {
+                $envMsg.textContent = status === 'ok' ? 'Restarting uploader...' : `Restart error: ${ack.message||'unknown'}`;
+              }
+              if (cmd === 'collections/refresh') {
+                const msg = (ack && ack.message) || '';
+                if (status === 'queued' || status === 'started' || status === 'progress') {
+                  if (!refreshInProgress) {
+                    // First message: lock and seed log
+                    refreshInProgress = true;
+                    refreshLog = ['Please stand by as artwork is loaded...'];
+                    const standbyUrl = `http://${location.hostname}:8080/app/standby.default.png`;
+                    $bg.innerHTML = `<img src="${standbyUrl}" alt="standby">`;
+                  }
+                  refreshLog.push(msg || 'Refresh in progress...');
+                  renderRefreshLog();
+                } else if (status === 'ok' || status === 'error') {
+                  const finalMsg = status === 'ok'
+                    ? (msg || 'Refresh complete.')
+                    : (msg ? `Refresh failed: ${msg}` : 'Refresh failed.');
+                  refreshLog.push(finalMsg);
+                  renderRefreshLog();
+                  setTimeout(() => {
+                    refreshInProgress = false;
+                    refreshLog = [];
+                    setInfo(lastAttrs || {});
+                  }, status === 'ok' ? 8000 : 12000);
+                }
+              }
+              setTimeout(() => { if ($envMsg.textContent) $envMsg.textContent=''; }, 8000);
+            } catch (e) { /* ignore */ }
+          }
+          if (topic === TOPIC_SELECTED) {
+            const val = (payload.toString() || '').split(',').map(s => s.trim()).filter(Boolean);
+            baseline = val;
+            if (!dirty) { staged = baseline.slice(); }
+            renderOptions();
+            updateButtons();
+            syncTriggerText();
+          }
+        } catch (e) { /* ignore */ }
+      });
+    }
+    const TOPIC_ATTR = 'frame_tv/selected_artwork/attributes';
+    const TOPIC_STATE = 'frame_tv/selected_artwork/state';
+    const TOPIC_COLL_ATTR = 'frame_tv/collections/attributes';
+    const TOPIC_SELECTED = 'frame_tv/selected_collections/state';
+    const TOPIC_SETTINGS_ATTR = 'frame_tv/settings/attributes';
+    const TOPIC_CMD_PREFIX = 'frame_tv/cmd';
+    const $refresh = document.getElementById('refresh');
+    const TOPIC_ACK_PREFIX = 'frame_tv/ack';
+
+    const $trigger = document.getElementById('ftv-trigger');
+    const $dropdown = document.getElementById('ftv-dropdown');
+    const $info = document.getElementById('info');
+    const $bg = document.getElementById('bg');
+    // Removed selected hint; trigger shows selection
+    const $apply = document.getElementById('apply');
+    const $clear = document.getElementById('clear');
+
+    // Selection staging state
+    let baseline = [];
+    let staged = [];
+    let dirty = false;
+    let options = [];
+
+    function arraysEqual(a, b) {
+      const aa = (a||[]).slice().sort();
+      const bb = (b||[]).slice().sort();
+      if (aa.length !== bb.length) return false;
+      for (let i=0;i<aa.length;i++) if (aa[i] !== bb[i]) return false;
+      return true;
+    }
+
+    function updateButtons() {
+      dirty = !arraysEqual(staged, baseline);
+      const showApply = !!dirty;
+      const showClear = staged.length > 0;
+      if ($apply) {
+        $apply.disabled = !showApply;
+        $apply.style.opacity = showApply ? 1 : 0.6;
+        $apply.style.display = showApply ? 'flex' : 'none';
+      }
+      if ($clear) {
+        $clear.disabled = !showClear;
+        $clear.style.display = showClear ? 'flex' : 'none';
+      }
+
+      // On small screens (iPhone portrait and similar), put refresh/apply/clear on the same line and size dynamically
+      const isMobile = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(max-width: 600px)').matches;
+      if (isMobile) {
+        if ($apply) $apply.style.flex = showApply ? '1 1 0' : '';
+        if ($clear) $clear.style.flex = showClear ? '1 1 0' : '';
+        if ($refresh) $refresh.style.flex = '1 1 0';
+      } else {
+        // Revert to default desktop sizing (40px buttons via CSS)
+        if ($apply) $apply.style.flex = '';
+        if ($clear) $clear.style.flex = '';
+        if ($refresh) $refresh.style.flex = '';
+      }
+      // Selected text now shown in trigger only
+    }
+
+    function syncTriggerText() {
+      const text = (staged && staged.length) ? `Selected: ${staged.join(', ')}` : 'Select collections...';
+      const el = document.querySelector('.ftv-trigger-text');
+      if (el) el.textContent = text;
+    }
+
+    function renderOptions() {
+      if (!$dropdown) return;
+      const setStage = new Set(staged || []);
+      const setApplied = new Set(baseline || []);
+      const sel = options.filter(o => setApplied.has(o)).sort();
+      const uns = options.filter(o => !setApplied.has(o)).sort();
+      const sorted = sel.concat(uns);
+      $dropdown.innerHTML = sorted.map(o => `
+        <div class="ftv-option ${setStage.has(o) ? 'selected' : ''}" data-value="${o}">
+          <div class="ftv-checkbox">
+            <svg viewBox="0 0 24 24"><path d="M9,20.42L2.79,14.21L5.62,11.38L9,14.77L18.88,4.88L21.71,7.71L9,20.42Z"/></svg>
+          </div>
+          <span>${o}</span>
+        </div>
+      `).join('');
+      $dropdown.querySelectorAll('.ftv-option').forEach(opt => {
+        opt.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const val = opt.dataset.value;
+          if (setStage.has(val)) setStage.delete(val); else setStage.add(val);
+          staged = Array.from(setStage);
+          updateButtons();
+          syncTriggerText();
+          renderOptions();
+        });
+      });
+    }
+
+    // Safe formatting helpers: escape HTML, then apply lightweight inline markup
+    function escapeHtml(text) {
+      if (text == null) return '';
+      return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/\"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+    function formatInline(text) {
+      let s = escapeHtml(text);
+      // Bold: **text** or *text*
+      s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+      s = s.replace(/\*(.+?)\*/g, '<strong>$1</strong>');
+      // Italic: _text_
+      s = s.replace(/_(.+?)_/g, '<em>$1</em>');
+      // Inline code: `code`
+      s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
+      return s;
+    }
+    function formatMultiline(text) {
+      return formatInline(text).replace(/\r?\n/g, '<br>');
+    }
+
+    let refreshInProgress = false;
+    let lastAttrs = null;
+    let refreshLog = [];
+
+    function renderRefreshLog() {
+      $info.innerHTML = refreshLog.map(l => `<div>${l}</div>`).join('');
+    }
+
+    function setInfo(attrs) {
+      if (refreshInProgress) return;
+      const title = attrs.artwork_title || '';
+      const year = attrs.artwork_year || '';
+      const artist = attrs.artist_name || '';
+      const lifespan = attrs.artist_lifespan || '';
+      const medium = attrs.artwork_medium || attrs.artist_medium || '';
+      const file = attrs.file || '';
+      const artistLine = artist ? `<span style="font-size:1.1em; font-weight:bold; color: white;">${formatInline(artist)}</span>${lifespan ? `<span style=\"font-size:0.9em; color: rgba(255,255,255,0.7);\"> (${escapeHtml(lifespan)})</span>` : ''}` : '';
+      const descriptionRaw = attrs.artwork_description;
+      const description = (typeof descriptionRaw === 'string') ? descriptionRaw.trim() : '';
+      const hasDescription = !!(description && !/^\s*(null|none|n\/a)\s*$/i.test(description) && description !== (file || ''));
+      const normalizedFile = String(file || '').trim().toLowerCase();
+      const isStandbyLike = !normalizedFile || normalizedFile === 'standby.png' || normalizedFile === 'unknown' || normalizedFile === 'unavailable' || normalizedFile === 'none';
+      const isStandby = normalizedFile === 'standby.png';
+
+      let t = '';
+      if (isStandbyLike) {
+        t = 'Please stand by as artwork is loaded...';
+      } else {
+        t = `
+          ${artistLine ? `<div style=\"line-height:1.3; margin-top: 2px;\">${artistLine}</div>` : ''}
+          <div style=\"line-height:1.3; margin-top: 8px;\"><em style=\"font-size:1.1em; color: white;\">${formatInline(title || file || 'Selected Artwork')}</em>${year ? `<span style=\"font-size:0.9em; color: rgba(255,255,255,0.7);\">, ${escapeHtml(year)}</span>` : ''}</div>
+          ${medium ? `<div class=\"line\">${formatInline(medium)}</div>` : ''}
+          <hr style="border: none; border-top: 1px solid rgba(255,255,255,0.15); margin: 8px 0; width: 100%;">
+          ${hasDescription ? `<div style=\"text-align: justify; color: rgba(255,255,255,0.8); font-size: 0.9em; line-height: 1.4;\">${formatMultiline(description)}</div>` : ''}
+        `;
+      }
+      $info.innerHTML = t;
+
+      // Build image URL using this host's static server (provided by uploader)
+      if (file && !isStandby) {
+        // Prefer explicit artwork_dir from CSV, then collection, then artist_name, then filename heuristic
+        const folder = attrs.artwork_dir || attrs.collection || artist || (file.match(/^(.+?)_[^_]+_/)?.[1] || '');
+        const url = `http://${location.hostname}:8080/app/frame_tv_art_collections/${encodeURIComponent(folder)}/${encodeURIComponent(file)}`;
+        // Preload to ensure show/hide behavior for standby vs artwork
+        const img = new Image();
+        img.onload = () => { $bg.innerHTML = `<img src="${url}" alt="artwork">`; };
+        img.onerror = () => {
+          // Fallback to immutable baked standby image if artwork load fails
+          const standbyUrl = `http://${location.hostname}:8080/app/standby.default.png`;
+          $bg.innerHTML = `<img src="${standbyUrl}" alt="standby">`;
+        };
+        img.src = url;
+      } else {
+        // No file or standby — show immutable baked standby explicitly
+        const standbyUrl = `http://${location.hostname}:8080/app/standby.default.png`;
+        $bg.innerHTML = `<img src="${standbyUrl}" alt="standby">`;
+      }
+    }
+
+    // Wire up settings UI
+    const $broker = document.getElementById('broker');
+    const $user = document.getElementById('user');
+    const $pass = document.getElementById('pass');
+    const $connect = document.getElementById('connect');
+    (async function initSettings(){
+      const env = await loadEnvDefaults();
+      const s = loadSettings(env);
+      // Initialize empty options; will be filled by MQTT
+      options = [];
+      renderOptions();
+      syncTriggerText();
+      updateButtons();
+      $broker.value = s.broker;
+      $user.value = s.username;
+      $pass.value = s.password;
+      connectMqtt(s.broker, s.username, s.password);
+    })();
+    $connect.onclick = async () => {
+      const b = $broker.value.trim();
+      const u = $user.value.trim();
+      const p = $pass.value;
+      saveSettings(b, u, p);
+      // Persist to container (in /data) so defaults survive browser/localStorage clearing
+      try {
+        await fetch('/api/ui-mqtt', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ broker: b, username: u, password: p })
+        });
+      } catch (_) { /* ignore */ }
+      connectMqtt(b, u, p);
+    };
+
+    // Dropdown open/close
+    const $tr = document.getElementById('ftv-trigger');
+    const $dd = document.getElementById('ftv-dropdown');
+    if ($tr && $dd) {
+      $tr.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const open = !$dd.classList.contains('open');
+        $tr.classList.toggle('open', open);
+        $dd.classList.toggle('open', open);
+      });
+      document.addEventListener('click', () => {
+        $tr.classList.remove('open');
+        $dd.classList.remove('open');
+      });
+    }
+    if ($refresh) {
+      $refresh.onclick = () => {
+        client.publish(`${TOPIC_CMD_PREFIX}/collections/refresh`, JSON.stringify({ req_id: Date.now() }), { qos: 1, retain: false });
+      };
+    }
+    if ($apply) {
+      $apply.onclick = () => {
+        if (!dirty) return;
+        client.publish(`${TOPIC_CMD_PREFIX}/collections/set`, JSON.stringify({ collections: staged, req_id: Date.now() }));
+        baseline = staged.slice();
+        updateButtons();
+        syncTriggerText();
+        // Also apply uploader env overrides/restart if present in Settings (handled below)
+      };
+    }
+    if ($clear) {
+      $clear.onclick = () => {
+        staged = [];
+        updateButtons();
+        syncTriggerText();
+        renderOptions();
+      };
+    }
+
+    // Tabs (folder style)
+    const $viewControl = document.getElementById('viewControl');
+    const $viewSettings = document.getElementById('viewSettings');
+    const $tabs = document.querySelectorAll('.tabbar .tab');
+    function show(tabKey) {
+      const isControl = tabKey === 'control';
+      $viewControl.style.display = isControl ? '' : 'none';
+      $viewSettings.style.display = isControl ? 'none' : '';
+      $tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === tabKey));
+    }
+    $tabs.forEach(t => t.addEventListener('click', () => show(t.dataset.tab)));
+    show('control');
+
+    // --- Settings: Manage uploader env overrides ---
+    const $maxUploads = document.createElement('input');
+    const $updateMins = document.createElement('input');
+    const $tvIp = document.createElement('input');
+    const $applyEnv = document.createElement('button');
+    const $restartEnv = document.createElement('button');
+    const $syncCollections = document.createElement('button');
+    $maxUploads.type = 'number'; $maxUploads.min = '1'; $maxUploads.placeholder = 'e.g. 30';
+    $updateMins.type = 'number'; $updateMins.min = '0'; $updateMins.placeholder = 'e.g. 30';
+    $tvIp.type = 'text'; $tvIp.placeholder = 'e.g. 10.83.21.57';
+    // Match MQTT input styling
+    const inputStyle = 'flex:1; padding:10px; background:#2a2623; color:#f2eee9; border:1px solid #4a3d37; border-radius:8px;';
+    $maxUploads.style = inputStyle;
+    $updateMins.style = inputStyle;
+    $tvIp.style = inputStyle;
+    $applyEnv.textContent = 'Apply & Refresh';
+    $applyEnv.style.marginTop = '8px';
+    $applyEnv.disabled = true; $applyEnv.style.opacity = 0.6;
+    $restartEnv.textContent = 'Restart Uploader';
+    $restartEnv.style.marginTop = '8px';
+    $restartEnv.className = 'button';
+    $syncCollections.textContent = 'Update & Refresh';
+    $syncCollections.style.marginTop = '8px';
+    $syncCollections.className = 'button';
+    const $envMsg = document.createElement('div');
+    $envMsg.className = 'hint';
+    $envMsg.style.marginTop = '6px';
+    // Build labeled fields similar to MQTT section
+    function makeField(labelText, inputEl) {
+      const wrap = document.createElement('div');
+      wrap.style.display = 'flex';
+      wrap.style.flexDirection = 'column';
+      wrap.style.flex = '1 1 33%';
+      wrap.style.minWidth = '0';
+      const label = document.createElement('div');
+      label.className = 'hint';
+      label.textContent = labelText;
+      label.style.margin = '4px 0 6px';
+      wrap.appendChild(label);
+      wrap.appendChild(inputEl);
+      return wrap;
+    }
+    // Split rows: TV IP directly after MQTT fields; other env below
+    const $envRow = document.createElement('div');
+    $envRow.className = 'row';
+    $envRow.style.marginTop = '8px';
+    $envRow.appendChild(makeField('Max uploads', $maxUploads));
+    $envRow.appendChild(makeField('Interval minutes', $updateMins));
+    const $tvRow = document.createElement('div');
+    $tvRow.className = 'row';
+    $tvRow.style.marginTop = '8px';
+    $tvRow.appendChild(makeField('Frame TV IP address', $tvIp));
+    const $settingsView = document.getElementById('viewSettings');
+    if ($settingsView) {
+      const $mqttRow = $settingsView.querySelector('.row');
+      if ($mqttRow) {
+        $mqttRow.insertAdjacentElement('afterend', $tvRow);
+      } else {
+        $settingsView.appendChild($tvRow);
+      }
+      $settingsView.appendChild($envRow);
+      const $btnRow = document.createElement('div');
+      $btnRow.className = 'row';
+      $btnRow.style.gap = '8px';
+      $btnRow.appendChild($applyEnv);
+      $btnRow.appendChild($restartEnv);
+      $btnRow.appendChild($syncCollections);
+      $settingsView.appendChild($btnRow);
+      $settingsView.appendChild($envMsg);
+    }
+    let envBaseline = {};
+    function markEnvDirty() {
+      const changed = (
+        String($maxUploads.value||'') !== String(envBaseline.SAMSUNG_TV_ART_MAX_UPLOADS||'') ||
+        String($updateMins.value||'') !== String(envBaseline.SAMSUNG_TV_ART_UPDATE_MINUTES||'') ||
+        String($tvIp.value||'') !== String(envBaseline.SAMSUNG_TV_ART_TV_IP||'')
+      );
+      $applyEnv.disabled = !changed; $applyEnv.style.opacity = changed ? 1 : 0.6;
+    }
+    $maxUploads.addEventListener('input', markEnvDirty);
+    $updateMins.addEventListener('input', markEnvDirty);
+    $tvIp.addEventListener('input', markEnvDirty);
+    // Load current settings from MQTT attributes topic
+    function loadEnvFromMqtt(attrs) {
+      try {
+        envBaseline = attrs || {};
+        $maxUploads.value = attrs.SAMSUNG_TV_ART_MAX_UPLOADS || '';
+        $updateMins.value = attrs.SAMSUNG_TV_ART_UPDATE_MINUTES || '';
+        $tvIp.value = attrs.SAMSUNG_TV_ART_TV_IP || '';
+        markEnvDirty();
+      } catch (_) {}
+    }
+    $applyEnv.onclick = () => {
+      const payload = {
+        SAMSUNG_TV_ART_MAX_UPLOADS: String($maxUploads.value||'').trim(),
+        SAMSUNG_TV_ART_UPDATE_MINUTES: String($updateMins.value||'').trim(),
+        SAMSUNG_TV_ART_TV_IP: String($tvIp.value||'').trim(),
+      };
+      client.publish(`${TOPIC_CMD_PREFIX}/settings/set`, JSON.stringify(payload), { qos: 1, retain: false });
+      client.publish(`${TOPIC_CMD_PREFIX}/settings/refresh`, JSON.stringify({ req_id: Date.now() }), { qos: 1, retain: false });
+      $applyEnv.textContent = 'Applying…';
+      $applyEnv.disabled = true; $applyEnv.style.opacity = 0.6;
+      $envMsg.textContent = 'Applying settings and requesting refresh…';
+      setTimeout(() => { $applyEnv.textContent = 'Apply & Refresh'; $applyEnv.disabled=false; $applyEnv.style.opacity=1; $envMsg.textContent=''; }, 4000);
+    };
+    $restartEnv.onclick = () => {
+      client.publish(`${TOPIC_CMD_PREFIX}/settings/restart`, JSON.stringify({ req_id: Date.now() }), { qos: 1, retain: false });
+      $envMsg.textContent = 'Restarting uploader...';
+      $restartEnv.disabled = true;
+      setTimeout(() => { $restartEnv.disabled = false; $envMsg.textContent=''; }, 6000);
+    };
+    $syncCollections.onclick = () => {
+      const reqId = Date.now();
+      refreshInProgress = true;
+      refreshLog = ['Please stand by as artwork is loaded...', 'Fetching latest collection updates...'];
+      renderRefreshLog();
+      const standbyUrl = `http://${location.hostname}:8080/app/standby.default.png`;
+      $bg.innerHTML = `<img src="${standbyUrl}" alt="standby">`;
+      client.publish(`${TOPIC_CMD_PREFIX}/settings/sync_collections`, JSON.stringify({ req_id: reqId }), { qos: 1, retain: false });
+    };
+  </script>
+</body>
+</html>

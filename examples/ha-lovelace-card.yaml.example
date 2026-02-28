@@ -1,0 +1,42 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Home Assistant Lovelace card configuration
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Step 1: Copy ha-card/samsung-tv-art-card.js into your HA config:
+#   cp ha-card/samsung-tv-art-card.js <ha-config>/www/samsung-tv-art-card/
+#
+# Step 2: Register the resource in your configuration.yaml:
+#   lovelace:
+#     resources:
+#       - url: /local/samsung-tv-art-card/samsung-tv-art-card.js?v=1.5.6
+#         type: module
+#
+# Step 3: Add the card to a dashboard view:
+
+type: custom:frame-tv-art-card
+
+# Required entities (auto-created by MQTT discovery when SAMSUNG_TV_ART_MQTT_DISCOVERY=true)
+collections_entity: sensor.frame_tv_art_collections
+selected_artwork_file_entity: sensor.frame_tv_art_selected_artwork
+selected_collections_entity: sensor.frame_tv_art_selected_collections
+settings_entity: sensor.frame_tv_art_settings
+
+# Image base URL — the card builds thumbnail URLs from this prefix + artwork path.
+# Use image_path_http for plain HTTP, image_path_https when HA is served over HTTPS.
+# The card picks the right one automatically based on window.location.protocol.
+#
+# Option A: direct from container (HTTP only — blocked as mixed content on HTTPS HA)
+image_path_http: http://10.0.0.10:8080/app/frame_tv_art_collections
+#
+# Option B: via reverse proxy with TLS (works on both HTTP and HTTPS HA)
+# image_path_https: https://samsung-tv-art.yourdomain.com/app/frame_tv_art_collections
+#
+# Option C: via HA /local (copy media into HA www — always works, no mixed content)
+# image_path: /local/frame_tv_art_collections
+
+# Optional: explicit standby image path (defaults to <image_path>/standby.png)
+# standby_image_path: /local/frame_tv_art_collections/standby.png
+
+# Optional: card display title
+title: Frame TV Art
+icon: mdi:palette

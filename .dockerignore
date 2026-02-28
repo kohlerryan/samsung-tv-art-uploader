@@ -1,0 +1,21 @@
+.git
+.gitignore
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+data/
+media/
+node_modules/
+*.log
+.env
+*.env.local
+
+# Repo-only files — not needed inside the container
+ha-card/
+examples/
+LICENSE
+README.md
+CHANGELOG.md
+*.md
+
