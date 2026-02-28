@@ -1,0 +1,25 @@
+services:
+  samsung-tv-art:
+    # Option A: pull the pre-built image from GitHub Container Registry
+    image: ghcr.io/kohlerryan/samsung-tv-art:latest
+
+    # Option B: build locally from source (comment out `image:` above and uncomment below)
+    # build:
+    #   context: ..
+    #   dockerfile: Dockerfile
+
+    container_name: samsung-tv-art
+    restart: unless-stopped
+    env_file:
+      - ./samsung-tv-art.env   # copy examples/samsung-tv-art.env.example → samsung-tv-art.env
+    volumes:
+      # Persistent state: TV auth token, settings overrides, cache
+      - ./data:/data
+      # Artwork media bind-mount — place your collection folders here.
+      # Each subfolder becomes a selectable collection (e.g. media/Monet/, media/Degas/).
+      # Leave empty or omit if you are using SAMSUNG_TV_ART_COLLECTIONS to fetch git repos.
+      - ./media:/app/frame_tv_art_collections
+    ports:
+      # Web UI (optional — only active when SAMSUNG_TV_ART_LOCAL_WEB=true)
+      - "8080:8080"
+    # network_mode: host   # alternative: use host networking for mDNS to work across VLANs
