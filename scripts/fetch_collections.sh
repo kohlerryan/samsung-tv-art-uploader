@@ -2,9 +2,11 @@
 set -eu
 
 # Fetch and update collection git repositories into the collections directory.
-# Sources can be provided via the environment variable `SAMSUNG_TV_ART_COLLECTIONS`
-# (comma- or space-separated list of git URLs, optional suffix `#branch`) or by
-# placing newline-separated repo URLs in `/data/collections.list`.
+# Sources can be provided via:
+#   - The environment variable SAMSUNG_TV_ART_COLLECTIONS as a space- or comma-separated
+#     list of git URLs (optional suffix #branch). Note: .env files do not support multiline
+#     values, so all URLs must be on a single line separated by spaces or commas.
+#   - A newline-separated list of URLs in /data/collections.list (recommended for many repos).
 
 COL_DIR="${SAMSUNG_TV_ART_COLLECTIONS_DIR:-/app/frame_tv_art_collections}"
 LIST_FILE="/data/collections.list"
