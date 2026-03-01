@@ -2,6 +2,8 @@
 
 Automatically uploads and rotates artwork on a **Samsung Frame TV**, with Home Assistant integration via MQTT for live entity state, collection selection, and a custom Lovelace card.
 
+Built on top of [NickWaterton/samsung-tv-ws-api](https://github.com/NickWaterton/samsung-tv-ws-api) for Samsung TV WebSocket communication.
+
 | Home Assistant Card | Web UI |
 |---|---|
 | ![HA Card](assets/hacard.png) | ![Web UI](assets/webui.png) |
@@ -273,6 +275,10 @@ samsung-tv-art/
 ```bash
 docker logs -f samsung-tv-art
 ```
+
+## Acknowledgements
+
+- **[samsung-tv-ws-api](https://github.com/NickWaterton/samsung-tv-ws-api)** by [NickWaterton](https://github.com/NickWaterton) — the WebSocket API library that handles all communication with the Samsung Frame TV, including art upload, content management, and art mode control.
 
 ## License
 
