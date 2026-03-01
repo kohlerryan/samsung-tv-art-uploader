@@ -1,5 +1,7 @@
 # Samsung Frame TV Art Uploader
 
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-donate-FFDD00?logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/kohlerryan)
+
 Automatically uploads and rotates artwork on a **Samsung Frame TV**, with Home Assistant integration via MQTT for live entity state, collection selection, and a custom Lovelace card.
 
 Built on top of [NickWaterton/samsung-tv-ws-api](https://github.com/NickWaterton/samsung-tv-ws-api) for Samsung TV WebSocket communication.
@@ -120,14 +122,101 @@ your-collection-repo/
   Monet_1877_Gare_Saint_Lazare.jpg
 ```
 
-Set `SAMSUNG_TV_ART_COLLECTIONS` in your env file:
+Set `SAMSUNG_TV_ART_COLLECTIONS` in your env file as a space- or comma-separated list of URLs:
 
 ```env
-SAMSUNG_TV_ART_COLLECTIONS=https://github.com/you/Monet.git
-  https://github.com/you/Degas.git
+SAMSUNG_TV_ART_COLLECTIONS=https://github.com/you/Monet.git https://github.com/you/Degas.git
 ```
 
+> **Note:** `.env` files do not support multiline values. If you have many repos, use a `collections.list` file instead (see below).
+
 Click **Update & Refresh** in the web UI or HA card to fetch the latest commits and re-seed the TV at any time.
+
+#### Ready-made artist collections
+
+A set of pre-built, ready-to-use artist collections is available at **[github.com/kohlerryan](https://github.com/kohlerryan?tab=repositories)**. Each repo follows the required structure and includes a fully populated `artwork_data.csv`.
+
+Available collections:
+
+| Repository | Artist |
+|---|---|
+| [Abbott_Handerson_Thayer](https://github.com/kohlerryan/Abbott_Handerson_Thayer) | Abbott Handerson Thayer |
+| [Adalbert_Stifter](https://github.com/kohlerryan/Adalbert_Stifter) | Adalbert Stifter |
+| [Akseli_Gallen-Kallela](https://github.com/kohlerryan/Akseli_Gallen-Kallela) | Akseli Gallen-Kallela |
+| [Albert_Bierstadt](https://github.com/kohlerryan/Albert_Bierstadt) | Albert Bierstadt |
+| [Alfred_Sisley](https://github.com/kohlerryan/Alfred_Sisley) | Alfred Sisley |
+| [Alphonse_Mucha](https://github.com/kohlerryan/Alphonse_Mucha) | Alphonse Mucha |
+| [Andy_Warhol](https://github.com/kohlerryan/Andy_Warhol) | Andy Warhol |
+| [Antoine_Chintreuil](https://github.com/kohlerryan/Antoine_Chintreuil) | Antoine Chintreuil |
+| [Arthur_Streeton](https://github.com/kohlerryan/Arthur_Streeton) | Arthur Streeton |
+| [Banksy](https://github.com/kohlerryan/Banksy) | Banksy |
+| [Berthe_Morisot](https://github.com/kohlerryan/Berthe_Morisot) | Berthe Morisot |
+| [Camille_Pissarro](https://github.com/kohlerryan/Camille_Pissarro) | Camille Pissarro |
+| [Charles_Marion_Russell](https://github.com/kohlerryan/Charles_Marion_Russell) | Charles Marion Russell |
+| [Childe_Hassam](https://github.com/kohlerryan/Childe_Hassam) | Childe Hassam |
+| [Claude_Monet](https://github.com/kohlerryan/Claude_Monet) | Claude Monet |
+| [Diego_Velazquez](https://github.com/kohlerryan/Diego_Velazquez) | Diego Velázquez |
+| [Edgar_Degas](https://github.com/kohlerryan/Edgar_Degas) | Edgar Degas |
+| [Edouard_Manet](https://github.com/kohlerryan/Edouard_Manet) | Édouard Manet |
+| [Edvard_Munch](https://github.com/kohlerryan/Edvard_Munch) | Edvard Munch |
+| [Edward_Hopper](https://github.com/kohlerryan/Edward_Hopper) | Edward Hopper |
+| [El_Greco](https://github.com/kohlerryan/El_Greco) | El Greco |
+| [Eugene_Boudin](https://github.com/kohlerryan/Eugene_Boudin) | Eugène Boudin |
+| [Eugene_Delacroix](https://github.com/kohlerryan/Eugene_Delacroix) | Eugène Delacroix |
+| [Francois_Boucher](https://github.com/kohlerryan/Francois_Boucher) | François Boucher |
+| [Franz_Marc](https://github.com/kohlerryan/Franz_Marc) | Franz Marc |
+| [Frederic_Remington](https://github.com/kohlerryan/Frederic_Remington) | Frederic Remington |
+| [Frederick_McCubbin](https://github.com/kohlerryan/Frederick_McCubbin) | Frederick McCubbin |
+| [George_Stubbs](https://github.com/kohlerryan/George_Stubbs) | George Stubbs |
+| [George_Wesley_Bellows](https://github.com/kohlerryan/George_Wesley_Bellows) | George Wesley Bellows |
+| [Georges_Seurat](https://github.com/kohlerryan/Georges_Seurat) | Georges Seurat |
+| [Gustav_Courbet](https://github.com/kohlerryan/Gustav_Courbet) | Gustav Courbet |
+| [Gustave_Caillebotte](https://github.com/kohlerryan/Gustave_Caillebotte) | Gustave Caillebotte |
+
+To use any of these, add their URLs to `SAMSUNG_TV_ART_COLLECTIONS` as a space-separated list. For example, to display Monet and Bierstadt:
+
+```env
+SAMSUNG_TV_ART_COLLECTIONS=https://github.com/kohlerryan/Claude_Monet.git https://github.com/kohlerryan/Albert_Bierstadt.git
+```
+
+For many collections, the env var approach gets unwieldy. Instead, create a `data/collections.list` file with one URL per line — this file takes effect automatically and supports as many repos as you like:
+
+```
+https://github.com/kohlerryan/Abbott_Handerson_Thayer.git
+https://github.com/kohlerryan/Adalbert_Stifter.git
+https://github.com/kohlerryan/Akseli_Gallen-Kallela.git
+https://github.com/kohlerryan/Albert_Bierstadt.git
+https://github.com/kohlerryan/Alfred_Sisley.git
+https://github.com/kohlerryan/Alphonse_Mucha.git
+https://github.com/kohlerryan/Andy_Warhol.git
+https://github.com/kohlerryan/Antoine_Chintreuil.git
+https://github.com/kohlerryan/Arthur_Streeton.git
+https://github.com/kohlerryan/Banksy.git
+https://github.com/kohlerryan/Berthe_Morisot.git
+https://github.com/kohlerryan/Camille_Pissarro.git
+https://github.com/kohlerryan/Charles_Marion_Russell.git
+https://github.com/kohlerryan/Childe_Hassam.git
+https://github.com/kohlerryan/Claude_Monet.git
+https://github.com/kohlerryan/Diego_Velazquez.git
+https://github.com/kohlerryan/Edgar_Degas.git
+https://github.com/kohlerryan/Edouard_Manet.git
+https://github.com/kohlerryan/Edvard_Munch.git
+https://github.com/kohlerryan/Edward_Hopper.git
+https://github.com/kohlerryan/El_Greco.git
+https://github.com/kohlerryan/Eugene_Boudin.git
+https://github.com/kohlerryan/Eugene_Delacroix.git
+https://github.com/kohlerryan/Francois_Boucher.git
+https://github.com/kohlerryan/Franz_Marc.git
+https://github.com/kohlerryan/Frederic_Remington.git
+https://github.com/kohlerryan/Frederick_McCubbin.git
+https://github.com/kohlerryan/George_Stubbs.git
+https://github.com/kohlerryan/George_Wesley_Bellows.git
+https://github.com/kohlerryan/Georges_Seurat.git
+https://github.com/kohlerryan/Gustav_Courbet.git
+https://github.com/kohlerryan/Gustave_Caillebotte.git
+```
+
+> Save this as `data/collections.list` in the directory where you run `docker compose`. The `data/` folder is already bind-mounted by the default compose file.
 
 ### Option B — Local bind-mount
 
@@ -158,7 +247,7 @@ Key variables:
 | `SAMSUNG_TV_ART_MAX_UPLOADS` | `30` | Max images kept on TV at once |
 | `SAMSUNG_TV_ART_SEQUENTIAL` | `false` | `true` = fixed order, `false` = shuffle |
 | `SAMSUNG_TV_ART_MQTT_HOST` | — | MQTT broker hostname or IP |
-| `SAMSUNG_TV_ART_COLLECTIONS` | — | Newline-separated git repo URLs |
+| `SAMSUNG_TV_ART_COLLECTIONS` | — | Space- or comma-separated git repo URLs (for many repos, use `data/collections.list` instead) |
 | `SAMSUNG_TV_ART_GITHUB_TOKEN` | — | GitHub PAT for private repos |
 | `SAMSUNG_TV_ART_FETCH_ON_START` | `false` | Fetch collections on container start |
 | `SAMSUNG_TV_ART_LOCAL_WEB` | `false` | Enable the web UI on port 8080 |
