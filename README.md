@@ -13,7 +13,7 @@ Automatically uploads and rotates artwork on a **Samsung Frame TV**, with Home A
 - Publishes artwork metadata (title, artist, description, collection) to MQTT for Home Assistant
 - MQTT discovery — entities are auto-created in HA with no manual YAML
 - Built-in web UI (port 8080) for collection selection, settings, and manual refresh
-- Home Assistant Lovelace card with live progress display during refresh operations
+- [Home Assistant Lovelace card](https://github.com/kohlerryan/samsung-tv-art-card) with live progress display during refresh operations
 - mDNS advertisement (`samsung-tv-art.local`) via Avahi
 
 ## Requirements
@@ -107,7 +107,9 @@ When `SAMSUNG_TV_ART_LOCAL_WEB=true`, a web interface is available at `http://sa
 
 ## Home Assistant card
 
-Install the custom Lovelace card from the `ha-card/` directory.  
+The Lovelace card is available as a standalone repository: **[kohlerryan/samsung-tv-art-card](https://github.com/kohlerryan/samsung-tv-art-card)**
+
+It is also bundled in this repo under `ha-card/`.  
 See [`ha-card/README.md`](ha-card/README.md) for installation steps and [`examples/ha-lovelace-card.yaml.example`](examples/ha-lovelace-card.yaml.example) for a complete card configuration.
 
 | Card — Collections & Control | Card — Settings |
