@@ -1,5 +1,5 @@
 /**
- * Frame TV Art Card v1.5.6
+ * Frame TV Art Card v0.1.0-alpha.2
  */
 
 class FrameTVArtCard extends HTMLElement {
