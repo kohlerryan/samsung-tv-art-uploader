@@ -47,10 +47,78 @@ Open the web UI at `http://samsung-tv-art.local:8080` (or `http://<host-ip>:8080
 
 ## Artwork collections
 
+### Collection folder structure
+
+Whether you use Git repos or a local bind-mount, every collection follows the same layout:
+
+```
+CollectionName/
+  artwork_data.csv          ← required: metadata for every image in this folder
+  Artist_Year_Title.jpg
+  Artist_Year_Title.jpg
+  ...
+```
+
+The folder name (`CollectionName`) becomes the selectable collection name in the UI and HA card.
+
+---
+
+### artwork_data.csv — required format
+
+Each collection **must** include an `artwork_data.csv` file at its root.  
+The file must be UTF-8 encoded with a header row. The following columns are recognized:
+
+| Column | Required | Description |
+|---|---|---|
+| `artwork_file` | **Yes** | Exact filename of the image (e.g. `Monet_1906_Water_Lilies.jpg`) |
+| `artwork_dir` | **Yes** | Folder name this image belongs to — must match the collection folder name |
+| `artist_name` | Recommended | Artist's full name — shown bold in the HA card |
+| `artist_lifespan` | Recommended | e.g. `1840–1926` — shown next to artist name |
+| `artwork_title` | Recommended | Title of the artwork — shown in italics in the HA card |
+| `artwork_year` | Recommended | Year created — shown next to the title |
+| `artwork_medium` | Optional | Medium (e.g. `Oil on canvas`) — shown below the title |
+| `artwork_description` | Optional | Description text. Supports **Markdown**: `**bold**`, `*italic*`, `***bold italic***`, `` `code` `` |
+
+> **Note:** `artwork_file` and `artwork_dir` are mandatory. Rows missing `artwork_file` are silently skipped. If no `artwork_data.csv` is present the images still rotate but the HA card will show no metadata.
+
+A template is provided at [`examples/artwork_data.csv.template`](examples/artwork_data.csv.template).
+
+**Example `artwork_data.csv`:**
+```csv
+artwork_file,artwork_dir,artist_name,artist_lifespan,artwork_title,artwork_year,artwork_medium,artwork_description
+Monet_1906_Water_Lilies.jpg,Monet,Claude Monet,1840–1926,Water Lilies,1906,Oil on canvas,One of Monet's most celebrated series.
+Monet_1877_Gare_Saint_Lazare.jpg,Monet,Claude Monet,1840–1926,Gare Saint-Lazare,1877,Oil on canvas,Painted as part of a series on light and atmosphere.
+```
+
+---
+
+### Image filename convention
+
+Filenames are parsed as a fallback when no CSV row is found for a file. Use this naming pattern for best results:
+
+```
+ArtistName_Year_Title of Work.jpg
+```
+
+Examples:
+- `Monet_1906_Water_Lilies.jpg`
+- `VanGogh_1889_Starry_Night.jpg`
+
+---
+
 ### Option A — Git repositories
 
-Set `SAMSUNG_TV_ART_COLLECTIONS` in your env file to a list of git repository URLs.  
-Each repo should contain `.jpg`/`.png` image files and an optional `.csv` with metadata.
+Each git repository should contain one collection folder's worth of images and an `artwork_data.csv`.  
+The recommended repo structure is:
+
+```
+your-collection-repo/
+  artwork_data.csv
+  Monet_1906_Water_Lilies.jpg
+  Monet_1877_Gare_Saint_Lazare.jpg
+```
+
+Set `SAMSUNG_TV_ART_COLLECTIONS` in your env file:
 
 ```env
 SAMSUNG_TV_ART_COLLECTIONS=https://github.com/you/Monet.git
@@ -61,13 +129,15 @@ Click **Update & Refresh** in the web UI or HA card to fetch the latest commits 
 
 ### Option B — Local bind-mount
 
-Place collection subdirectories inside `./media`:
+Place collection subdirectories inside `./media`, each with their own `artwork_data.csv`:
 ```
 media/
   Monet/
-    Monet_1906_Water Lilies.jpg
+    artwork_data.csv
+    Monet_1906_Water_Lilies.jpg
     ...
   Degas/
+    artwork_data.csv
     ...
 ```
 
@@ -185,7 +255,8 @@ samsung-tv-art/
 ├── examples/
 │   ├── docker-compose.yml
 │   ├── samsung-tv-art.env.example
-│   └── ha-lovelace-card.yaml.example
+│   ├── ha-lovelace-card.yaml.example
+│   └── artwork_data.csv.template  — copy and fill in for each collection
 ├── data/                  — bind-mount target (gitignored contents)
 └── media/                 — bind-mount target for local artwork (gitignored contents)
 ```
