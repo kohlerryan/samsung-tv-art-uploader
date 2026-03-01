@@ -2,6 +2,10 @@
 
 Automatically uploads and rotates artwork on a **Samsung Frame TV**, with Home Assistant integration via MQTT for live entity state, collection selection, and a custom Lovelace card.
 
+| Home Assistant Card | Web UI |
+|---|---|
+| ![HA Card](assets/hacard.png) | ![Web UI](assets/webui.png) |
+
 ## Features
 
 - Fetches artwork collections from git repositories (or uses a local bind-mount)
@@ -21,15 +25,21 @@ Automatically uploads and rotates artwork on a **Samsung Frame TV**, with Home A
 
 ## Quick start
 
+**1. Copy and edit the env file**
 ```bash
-# 1. Copy and edit the env file
 cp examples/samsung-tv-art.env.example samsung-tv-art.env
-# Edit samsung-tv-art.env — set TV IP, MQTT host/credentials, etc.
+```
+Open `samsung-tv-art.env` and set at minimum:
+- `SAMSUNG_TV_ART_TV_IP` — the IP address of your Frame TV
+- `SAMSUNG_TV_ART_MQTT_HOST` — your MQTT broker (if using HA integration)
 
-# 2. Copy and edit the compose file
+**2. Copy and edit the compose file**
+```bash
 cp examples/docker-compose.yml docker-compose.yml
+```
 
-# 3. Build and start
+**3. Start the container**
+```bash
 docker compose up -d
 ```
 
@@ -84,10 +94,25 @@ Key variables:
 
 See `examples/samsung-tv-art.env.example` for the full list with descriptions.
 
+## Web UI
+
+When `SAMSUNG_TV_ART_LOCAL_WEB=true`, a web interface is available at `http://samsung-tv-art.local:8080`.
+
+| Collections & Control | Settings |
+|---|---|
+| ![Web UI Control](assets/webui_control.png) | ![Web UI Settings](assets/webui_settings.png) |
+
+- **Collections** tab — select which collections are active and trigger a refresh
+- **Settings** tab — adjust rotation interval, upload limit, sequence mode, and more without restarting the container
+
 ## Home Assistant card
 
 Install the custom Lovelace card from the `ha-card/` directory.  
 See [`ha-card/README.md`](ha-card/README.md) for installation steps and [`examples/ha-lovelace-card.yaml.example`](examples/ha-lovelace-card.yaml.example) for a complete card configuration.
+
+| Card — Collections & Control | Card — Settings |
+|---|---|
+| ![HA Card Control](assets/hacard_control.png) | ![HA Card Settings](assets/hacard_settings.png) |
 
 ### Mixed-content / image URLs
 
@@ -139,7 +164,13 @@ samsung-tv-art/
 ├── uploader.py            — main TV uploader and MQTT integration
 ├── serve.py               — minimal HTTP server for the web UI
 ├── assets/
-│   └── standby.png        — default standby artwork baked into the image
+│   ├── standby.png        — default standby artwork baked into the image
+│   ├── hacard.png         — HA card screenshot
+│   ├── hacard_control.png — HA card collections/control panel screenshot
+│   ├── hacard_settings.png— HA card settings panel screenshot
+│   ├── webui.png          — web UI screenshot
+│   ├── webui_control.png  — web UI collections/control panel screenshot
+│   └── webui_settings.png — web UI settings panel screenshot
 ├── ha-card/
 │   ├── samsung-tv-art-card.js   — Home Assistant Lovelace card
 │   └── README.md

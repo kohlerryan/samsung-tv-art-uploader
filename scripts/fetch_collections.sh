@@ -74,7 +74,7 @@ for src in $(echo "$COL_LIST" | sed 's/,/ /g'); do
     echo "Updating collection $name from $repo"
     (cd "$dest" && 
        GIT_FETCH origin ${branch:+$branch} >/dev/null 2>&1 || true && 
-       if [ -n "$branch" ]; then git reset --hard origin/$branch >/dev/null 2>&1 || true; else git pull --ff-only >/dev/null 2>&1 || true; fi
+       if [ -n "$branch" ]; then git reset --hard origin/$branch >/dev/null 2>&1 || true; else git reset --hard FETCH_HEAD >/dev/null 2>&1 || true; fi
     ) || echo "Warning: failed to update $name"
   else
     echo "Cloning collection $name from $repo"
