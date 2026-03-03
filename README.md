@@ -174,6 +174,9 @@ Available collections:
 | [Georges_Seurat](https://github.com/kohlerryan/Georges_Seurat) | Georges Seurat |
 | [Gustav_Courbet](https://github.com/kohlerryan/Gustav_Courbet) | Gustav Courbet |
 | [Gustave_Caillebotte](https://github.com/kohlerryan/Gustave_Caillebotte) | Gustave Caillebotte |
+| [Henri_Matisse](https://github.com/kohlerryan/Henri_Matisse) | Henri Matisse |
+| [Jackson_Pollock](https://github.com/kohlerryan/Jackson_Pollock) | Jackson Pollock |
+| [Vincent_van_Gogh](https://github.com/kohlerryan/Vincent_van_Gogh) | Vincent van Gogh |
 
 To use any of these, add their URLs to `SAMSUNG_TV_ART_COLLECTIONS` as a space-separated list. For example, to display Monet and Bierstadt:
 
@@ -216,6 +219,9 @@ https://github.com/kohlerryan/George_Wesley_Bellows.git
 https://github.com/kohlerryan/Georges_Seurat.git
 https://github.com/kohlerryan/Gustav_Courbet.git
 https://github.com/kohlerryan/Gustave_Caillebotte.git
+https://github.com/kohlerryan/Henri_Matisse.git
+https://github.com/kohlerryan/Jackson_Pollock.git
+https://github.com/kohlerryan/Vincent_van_Gogh.git
 ```
 
 > Save this as `data/collections.list` in the directory where you run `docker compose`. The `data/` folder is already bind-mounted by the default compose file.
