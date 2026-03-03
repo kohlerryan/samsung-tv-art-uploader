@@ -1,5 +1,7 @@
 FROM python:3.11-slim
 
+LABEL org.opencontainers.image.source=https://github.com/kohlerryan/samsung-tv-art-uploader
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates git avahi-daemon avahi-utils dbus \
     && rm -rf /var/lib/apt/lists/*
