@@ -1431,7 +1431,9 @@ class monitor_and_display:
             self._mqtt.on_disconnect = self._on_mqtt_disconnect
             self._mqtt.on_message = self._on_mqtt_message
             try:
-                self._mqtt.on_publish = getattr(self, '_on_mqtt_publish', None)
+                # Use a compatibility wrapper so both paho v1 and v2 callback
+                # signatures are supported without warnings or crashes.
+                self._mqtt.on_publish = self._on_mqtt_publish_compat
             except Exception:
                 pass
             try:
@@ -1605,6 +1607,13 @@ class monitor_and_display:
     def _on_mqtt_publish(self, client, userdata, mid):
         try:
             self.log.debug('MQTT published (mid=%s)', str(mid))
+        except Exception:
+            pass
+
+    # paho v2 passes extra positional args (properties, reasonCode). Accept and ignore.
+    def _on_mqtt_publish_compat(self, client, userdata, mid, *args, **kwargs):
+        try:
+            return self._on_mqtt_publish(client, userdata, mid)
         except Exception:
             pass
 
