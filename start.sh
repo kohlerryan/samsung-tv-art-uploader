@@ -111,8 +111,26 @@ fi
 if [ "${SAMSUNG_TV_ART_MDNS_ENABLE:-true}" = "true" ]; then
   HOST_NAME="${SAMSUNG_TV_ART_PUBLIC_HOSTNAME:-${HOSTNAME}}"
   DOMAIN_NAME="local"
+
+  # ── 1. Ensure a machine-id exists (dbus refuses to start without one) ──────
+  if [ ! -s /etc/machine-id ]; then
+    if command -v dbus-uuidgen >/dev/null 2>&1; then
+      dbus-uuidgen > /etc/machine-id 2>/dev/null || true
+    else
+      # Fallback: generate a pseudo-random 32-char hex string
+      cat /proc/sys/kernel/random/uuid 2>/dev/null | tr -d '-' > /etc/machine-id || true
+    fi
+  fi
+  # Some distros symlink /var/lib/dbus/machine-id → /etc/machine-id; ensure both exist
+  mkdir -p /var/lib/dbus
+  [ -s /var/lib/dbus/machine-id ] || cp /etc/machine-id /var/lib/dbus/machine-id 2>/dev/null || true
+
+  # ── 2. Clean up any stale dbus / avahi artifacts from a previous run ───────
+  rm -f /run/dbus/system_bus_socket /run/dbus/pid
+  rm -f /run/avahi-daemon/pid /run/avahi-daemon/socket
   mkdir -p /run/dbus /etc/avahi/services /run/avahi-daemon /etc/avahi
-  # Configure Avahi to use our desired hostname (independent of kernel hostname)
+
+  # ── 3. Write Avahi daemon config ───────────────────────────────────────────
   cat > /etc/avahi/avahi-daemon.conf <<EOF
 [server]
 host-name=${HOST_NAME}
@@ -129,14 +147,20 @@ publish-aaaa-on-ipv4=no
 publish-a-on-ipv6=no
 EOF
 
-  # Start minimal system dbus for avahi-daemon
-  dbus-daemon --system --address=unix:path=/run/dbus/system_bus_socket --nofork --nopidfile >/dev/null 2>&1 &
-  # Give dbus a brief moment to create the socket
-  for i in $(seq 1 10); do
+  # ── 4. Start dbus and wait for its socket ──────────────────────────────────
+  dbus-daemon --system --address=unix:path=/run/dbus/system_bus_socket \
+    --nofork --nopidfile >/dev/null 2>&1 &
+  DBUS_PID=$!
+  for i in $(seq 1 20); do
     [ -S /run/dbus/system_bus_socket ] && break
     sleep 0.2
   done
-  # Create an mDNS service for the Web UI (_http._tcp on port 8080)
+  if [ ! -S /run/dbus/system_bus_socket ]; then
+    echo "mDNS: warning: dbus socket did not appear; avahi may not start correctly." >&2
+  fi
+  export DBUS_SYSTEM_BUS_ADDRESS="unix:path=/run/dbus/system_bus_socket"
+
+  # ── 5. Write the HTTP service advertisement ────────────────────────────────
   cat > /etc/avahi/services/samsung-tv-art-http.service <<EOF
 <?xml version="1.0" standalone='no'?><!--*-nxml-*-->
 <!DOCTYPE service-group SYSTEM "avahi-service.dtd">
@@ -148,25 +172,43 @@ EOF
   </service>
 </service-group>
 EOF
-  # Launch avahi-daemon in background (fail visibly if it can't start)
-  if ! avahi-daemon -D; then
-    echo "mDNS: avahi-daemon failed to start; printing debug output..." >&2
-    avahi-daemon -f --debug 2>&1 | sed -n '1,120p' >&2 &
-  fi
-  # Check that avahi-daemon is running
-  if ! avahi-daemon --check >/dev/null 2>&1; then
-    echo "mDNS: warning: avahi-daemon does not appear to be running (will continue)." >&2
-  fi
-  # Health check: wait until our .local resolves (up to ~10s)
-  for i in $(seq 1 20); do
-    if avahi-resolve -n "${HOST_NAME}.local" >/dev/null 2>&1; then
-      echo "mDNS: ${HOST_NAME}.local is resolvable; advertising _http._tcp on 8080"
-      break
-    fi
-    sleep 0.5
+
+  # ── 6. Launch avahi-daemon ─────────────────────────────────────────────────
+  # Run in foreground (no -D) backgrounded with &. --no-rlimits / --no-chroot /
+  # --no-drop-root avoid capability and chroot failures inside containers.
+  avahi-daemon --no-rlimits --no-chroot --no-drop-root >/var/log/avahi.log 2>&1 &
+  AVAHI_PID=$!
+
+  # ── 7. Wait for avahi-daemon to be ready (up to ~5 s) ──────────────────────
+  for i in $(seq 1 25); do
+    avahi-daemon --check >/dev/null 2>&1 && break
+    # Also bail early if the process already died
+    kill -0 "$AVAHI_PID" 2>/dev/null || break
+    sleep 0.2
   done
-  if ! avahi-resolve -n "${HOST_NAME}.local" >/dev/null 2>&1; then
-    echo "mDNS: warning: could not verify ${HOST_NAME}.local resolution (avahi not running yet, interface mismatch, or multicast filtered). Continuing."
+
+  if avahi-daemon --check >/dev/null 2>&1; then
+    echo "mDNS: avahi-daemon running (pid $AVAHI_PID)"
+    # ── 8. Verify .local resolution (up to ~10 s) ────────────────────────────
+    resolved=false
+    for i in $(seq 1 20); do
+      if avahi-resolve -n "${HOST_NAME}.local" >/dev/null 2>&1; then
+        resolved=true
+        break
+      fi
+      sleep 0.5
+    done
+    if [ "$resolved" = "true" ]; then
+      echo "mDNS: ${HOST_NAME}.local is resolvable — advertising _http._tcp on 8080"
+    else
+      echo "mDNS: avahi is running but ${HOST_NAME}.local did not resolve within 10 s." >&2
+      echo "mDNS: This is normal on Docker bridge networks — use 'network_mode: host'" >&2
+      echo "mDNS: in your compose file for mDNS to work across the LAN." >&2
+    fi
+  else
+    echo "mDNS: avahi-daemon failed to start. Last log output:" >&2
+    tail -20 /var/log/avahi.log >&2 || true
+    echo "mDNS: Continuing without mDNS advertisement." >&2
   fi
 fi
 
