@@ -51,6 +51,9 @@ Example:
 import sys
 import logging
 import os
+import socket
+import uuid
+import re
 import io
 import random
 import json
@@ -1406,13 +1409,15 @@ class monitor_and_display:
         if not self.mqtt_enabled or mqtt is None:
             return
         try:
-            # paho-mqtt 2.x introduced CallbackAPIVersion; explicitly request VERSION1
-            # to keep backward-compatible callback signatures (on_connect/on_disconnect
-            # as (client, userdata, flags, rc) rather than the new reason-code objects).
-            # Falls back gracefully on paho 1.x which has no CallbackAPIVersion.
-            _cb_api = getattr(getattr(mqtt, 'CallbackAPIVersion', None), 'VERSION1', None)
+            # paho-mqtt 2.x introduced CallbackAPIVersion. Prefer VERSION2 to avoid
+            # deprecation warnings, but gracefully fall back to VERSION1 (paho 2.x)
+            # or omit entirely (paho 1.x) when not available.
+            _cb_cls = getattr(mqtt, 'CallbackAPIVersion', None)
+            _cb_api = None
+            if _cb_cls is not None:
+                _cb_api = getattr(_cb_cls, 'VERSION2', None) or getattr(_cb_cls, 'VERSION1', None)
             _client_kwargs = dict(
-                client_id=f"frame-tv-art-{os.getpid()}",
+                client_id=self._resolve_mqtt_client_id(),
                 clean_session=True,
                 protocol=getattr(mqtt, 'MQTTv311', 4),
             )
@@ -1469,6 +1474,56 @@ class monitor_and_display:
             self.log.warning('MQTT init failed: %s', e)
             self._mqtt = None
 
+    def _resolve_mqtt_client_id(self) -> str:
+        """Return a stable, unique MQTT client_id for this container instance.
+        Priority:
+          1) Explicit override via SAMSUNG_TV_ART_MQTT_CLIENT_ID
+          2) Persisted UUID in /data/client_id.txt (created on first run)
+          3) HOSTNAME + short UUID suffix
+
+        The final ID is sanitized to [A-Za-z0-9_-] and trimmed to <= 64 chars
+        for broad broker compatibility.
+        """
+        try:
+            # 1) Explicit override
+            override = os.environ.get('SAMSUNG_TV_ART_MQTT_CLIENT_ID')
+            if override:
+                cid = override.strip()
+            else:
+                # 2) Persisted UUID in /data
+                data_dir = '/data'
+                cid_file = os.path.join(data_dir, 'client_id.txt')
+                persisted = None
+                try:
+                    if os.path.isfile(cid_file):
+                        with open(cid_file, 'r') as f:
+                            persisted = f.read().strip()
+                    else:
+                        os.makedirs(data_dir, exist_ok=True)
+                        persisted = str(uuid.uuid4())
+                        # Write atomically
+                        tmp_path = cid_file + '.tmp'
+                        with open(tmp_path, 'w') as f:
+                            f.write(persisted)
+                        os.replace(tmp_path, cid_file)
+                except Exception:
+                    # Fall through to ephemeral if persistence fails
+                    persisted = None
+
+                host = os.environ.get('HOSTNAME') or socket.gethostname() or 'container'
+                # 3) Compose ID
+                suffix = (persisted or str(uuid.uuid4()))[:8]
+                cid = f"frame-tv-art-{host}-{suffix}"
+
+            # Sanitize and trim
+            cid = re.sub(r'[^A-Za-z0-9_-]', '-', cid)
+            if len(cid) > 64:
+                cid = cid[:64]
+            return cid
+        except Exception:
+            # Absolute fallback to a random UUID-based id
+            return f"frame-tv-art-{str(uuid.uuid4())[:8]}"
+
     def _on_mqtt_message(self, client, userdata, msg):
         try:
             topic = getattr(msg, 'topic', '')
@@ -1523,8 +1578,9 @@ class monitor_and_display:
     # MQTT callbacks (connection lifecycle)
     def _on_mqtt_connect(self, client, userdata, flags, rc, properties=None):  # properties for MQTTv5 compatibility
         try:
-            self._mqtt_is_connected = (rc == 0)
-            if rc == 0:
+            rc_val = getattr(rc, 'value', rc)
+            self._mqtt_is_connected = (rc_val == 0)
+            if rc_val == 0:
                 self.log.info('MQTT connected (CONNACK rc=0)')
                 # Ensure subscriptions are in place after reconnects
                 try:
@@ -1534,14 +1590,15 @@ class monitor_and_display:
                 except Exception:
                     pass
             else:
-                self.log.warning('MQTT connect failed (rc=%s)', rc)
+                self.log.warning('MQTT connect failed (rc=%s)', str(rc_val))
         except Exception:
             pass
 
     def _on_mqtt_disconnect(self, client, userdata, rc, properties=None):
         try:
             self._mqtt_is_connected = False
-            self.log.warning('MQTT disconnected (rc=%s)', str(rc))
+            rc_val = getattr(rc, 'value', rc)
+            self.log.warning('MQTT disconnected (rc=%s)', str(rc_val))
         except Exception:
             pass
 
