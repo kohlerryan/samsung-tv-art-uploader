@@ -1406,8 +1406,19 @@ class monitor_and_display:
         if not self.mqtt_enabled or mqtt is None:
             return
         try:
-            # Use MQTT v3.1.1 for widest broker compatibility
-            self._mqtt = mqtt.Client(client_id=f"frame-tv-art-{os.getpid()}", clean_session=True, protocol=getattr(mqtt, 'MQTTv311', 4))
+            # paho-mqtt 2.x introduced CallbackAPIVersion; explicitly request VERSION1
+            # to keep backward-compatible callback signatures (on_connect/on_disconnect
+            # as (client, userdata, flags, rc) rather than the new reason-code objects).
+            # Falls back gracefully on paho 1.x which has no CallbackAPIVersion.
+            _cb_api = getattr(getattr(mqtt, 'CallbackAPIVersion', None), 'VERSION1', None)
+            _client_kwargs = dict(
+                client_id=f"frame-tv-art-{os.getpid()}",
+                clean_session=True,
+                protocol=getattr(mqtt, 'MQTTv311', 4),
+            )
+            if _cb_api is not None:
+                _client_kwargs['callback_api_version'] = _cb_api
+            self._mqtt = mqtt.Client(**_client_kwargs)
             if self.mqtt_username:
                 self._mqtt.username_pw_set(self.mqtt_username, self.mqtt_password)
             # Setup callbacks and logging
@@ -1426,8 +1437,10 @@ class monitor_and_display:
                 self._mqtt.reconnect_delay_set(min_delay=5, max_delay=60)
             except Exception:
                 pass
-            # Connect and start network loop
-            self._mqtt.connect(self.mqtt_host, self.mqtt_port, keepalive=60)
+            # Connect and start network loop.
+            # keepalive=30 keeps the connection alive through typical NAT session
+            # timeouts (many routers close idle TCP sessions after 30-60 s).
+            self._mqtt.connect(self.mqtt_host, self.mqtt_port, keepalive=30)
             self._mqtt.loop_start()
             # Give it a brief moment to receive CONNACK
             for _ in range(20):
