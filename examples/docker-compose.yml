@@ -19,7 +19,66 @@ services:
       # Each subfolder becomes a selectable collection (e.g. media/Monet/, media/Degas/).
       # Leave empty or omit if you are using SAMSUNG_TV_ART_COLLECTIONS to fetch git repos.
       - ./media:/app/frame_tv_art_collections
+
+    # ── Network mode — choose ONE of the three options below ─────────────────
+    #
+    # OPTION 1 — host (simplest, recommended for most setups)
+    #   The container shares the host's network stack.
+    #   mDNS multicast reaches all LAN devices including the host.
+    #   The `ports` mapping is ignored in host mode — port 8080 is exposed directly.
+    #   ⚠ Not available on Docker Desktop (Mac/Windows).
+    network_mode: host
+
+    # OPTION 2 — macvlan (container gets its own LAN IP / MAC address)
+    #   Best when you want the container to appear as a first-class LAN device
+    #   (e.g. your router assigns it a DHCP lease or you give it a static IP).
+    #   mDNS multicast works for all LAN devices.
+    #   ⚠ The Docker host itself CANNOT reach the container over macvlan
+    #     (macvlan hairpin limitation) — use Option 3 if you need both.
+    #   Steps to enable:
+    #     1. Comment out `network_mode: host` above.
+    #     2. Uncomment the `networks:` block on the service and the `networks:`
+    #        section at the bottom of this file.
+    #     3. Set `parent`, `subnet`, `gateway`, and `ip_range` / `ipv4_address`
+    #        to match your LAN.
+    #
+    # networks:
+    #   macvlan_net:
+    #     ipv4_address: 192.168.1.245   # static IP for this container on your LAN
+
+    # OPTION 3 — macvlan + bridge (LAN presence AND host/container reachability)
+    #   Attach the container to BOTH a macvlan network (for LAN mDNS) AND a
+    #   standard Docker bridge (for reaching other containers or the host).
+    #   The host can reach the container via the bridge IP; LAN devices via the
+    #   macvlan IP.  mDNS advertises on the macvlan interface.
+    #   Steps to enable:
+    #     1. Comment out `network_mode: host` above.
+    #     2. Uncomment both `networks:` blocks below and in the bottom section.
+    #     3. Adjust IPs and interface names to match your environment.
+    #
+    # networks:
+    #   macvlan_net:
+    #     ipv4_address: 192.168.1.245   # LAN-visible IP
+    #   bridge_net:                     # optional: for host↔container comms
+
     ports:
-      # Web UI (optional — only active when SAMSUNG_TV_ART_LOCAL_WEB=true)
+      # Web UI — only active when SAMSUNG_TV_ART_LOCAL_WEB=true.
+      # Ignored in host mode; used in bridge/macvlan modes.
       - "8080:8080"
-    # network_mode: host   # alternative: use host networking for mDNS to work across VLANs
+
+# ── Network definitions (for macvlan Options 2 & 3) ───────────────────────────
+# Uncomment and adjust when using macvlan networking above.
+#
+# networks:
+#   macvlan_net:
+#     driver: macvlan
+#     driver_opts:
+#       parent: eth0          # ← host interface connected to your LAN (check with `ip link`)
+#     ipam:
+#       config:
+#         - subnet: 192.168.1.0/24
+#           gateway: 192.168.1.1
+#           ip_range: 192.168.1.240/28  # reserve a small range for macvlan containers
+#
+#   bridge_net:               # only needed for Option 3
+#     driver: bridge
