@@ -279,7 +279,7 @@
                     // First message: lock and seed log
                     refreshInProgress = true;
                     refreshLog = ['Please stand by as artwork is loaded...'];
-                    const standbyUrl = `http://${location.hostname}:8080/app/standby.default.png`;
+                    const standbyUrl = `${location.origin}/app/standby.default.png`;
                     $bg.innerHTML = `<img src="${standbyUrl}" alt="standby">`;
                   }
                   refreshLog.push(msg || 'Refresh in progress...');
@@ -472,19 +472,19 @@
       if (file && !isStandby) {
         // Prefer explicit artwork_dir from CSV, then collection, then artist_name, then filename heuristic
         const folder = attrs.artwork_dir || attrs.collection || artist || (file.match(/^(.+?)_[^_]+_/)?.[1] || '');
-        const url = `http://${location.hostname}:8080/app/frame_tv_art_collections/${encodeURIComponent(folder)}/${encodeURIComponent(file)}`;
+        const url = `${location.origin}/app/frame_tv_art_collections/${encodeURIComponent(folder)}/${encodeURIComponent(file)}`;
         // Preload to ensure show/hide behavior for standby vs artwork
         const img = new Image();
         img.onload = () => { $bg.innerHTML = `<img src="${url}" alt="artwork">`; };
         img.onerror = () => {
           // Fallback to immutable baked standby image if artwork load fails
-          const standbyUrl = `http://${location.hostname}:8080/app/standby.default.png`;
+          const standbyUrl = `${location.origin}/app/standby.default.png`;
           $bg.innerHTML = `<img src="${standbyUrl}" alt="standby">`;
         };
         img.src = url;
       } else {
         // No file or standby — show immutable baked standby explicitly
-        const standbyUrl = `http://${location.hostname}:8080/app/standby.default.png`;
+        const standbyUrl = `${location.origin}/app/standby.default.png`;
         $bg.innerHTML = `<img src="${standbyUrl}" alt="standby">`;
       }
     }
@@ -691,7 +691,7 @@
       refreshInProgress = true;
       refreshLog = ['Please stand by as artwork is loaded...', 'Fetching latest collection updates...'];
       renderRefreshLog();
-      const standbyUrl = `http://${location.hostname}:8080/app/standby.default.png`;
+      const standbyUrl = `${location.origin}/app/standby.default.png`;
       $bg.innerHTML = `<img src="${standbyUrl}" alt="standby">`;
       client.publish(`${TOPIC_CMD_PREFIX}/settings/sync_collections`, JSON.stringify({ req_id: reqId }), { qos: 1, retain: false });
     };
