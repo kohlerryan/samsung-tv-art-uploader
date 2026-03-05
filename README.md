@@ -78,6 +78,7 @@ The file must be UTF-8 encoded with a header row. The following columns are reco
 |---|---|---|
 | `artwork_file` | **Yes** | Exact filename of the image (e.g. `Monet_1906_Water_Lilies.jpg`) |
 | `artwork_dir` | **Yes** | Folder name this image belongs to — must match the collection folder name |
+| `collection_name` | Conditional | Display name for the collection in the UI and HA card drop-down. **Required when a collection contains artwork by more than one artist** (see note below). Takes precedence over `artist_name` as the collection label. |
 | `artist_name` | Recommended | Artist's full name — shown bold in the HA card |
 | `artist_lifespan` | Recommended | e.g. `1840–1926` — shown next to artist name |
 | `artwork_title` | Recommended | Title of the artwork — shown in italics in the HA card |
@@ -87,13 +88,25 @@ The file must be UTF-8 encoded with a header row. The following columns are reco
 
 > **Note:** `artwork_file` and `artwork_dir` are mandatory. Rows missing `artwork_file` are silently skipped. If no `artwork_data.csv` is present the images still rotate but the HA card will show no metadata.
 
+> **⚠️ Collection naming rule:** Every row that shares the same `artwork_dir` **must** produce a single, consistent collection label — otherwise the collection will appear more than once (or not at all) in the drop-down. There are two ways to satisfy this:
+> - **Single-artist collection** — leave `collection_name` empty and ensure every row has the same `artist_name`. The artist name becomes the label automatically.
+> - **Multi-artist collection** — set `collection_name` to the same value on **every row** in that `artwork_dir`. This overrides `artist_name` as the label and keeps the collection unified regardless of how many different artists are in the folder.
+
 A template is provided at [`examples/artwork_data.csv.template`](examples/artwork_data.csv.template).
 
-**Example `artwork_data.csv`:**
+**Example `artwork_data.csv` — single-artist collection** (leave `collection_name` empty, `artist_name` is used as the label):
 ```csv
-artwork_file,artwork_dir,artist_name,artist_lifespan,artwork_title,artwork_year,artwork_medium,artwork_description
-Monet_1906_Water_Lilies.jpg,Monet,Claude Monet,1840–1926,Water Lilies,1906,Oil on canvas,One of Monet's most celebrated series.
-Monet_1877_Gare_Saint_Lazare.jpg,Monet,Claude Monet,1840–1926,Gare Saint-Lazare,1877,Oil on canvas,Painted as part of a series on light and atmosphere.
+artwork_file,artwork_dir,collection_name,artist_name,artist_lifespan,artwork_title,artwork_year,artwork_medium,artwork_description
+Monet_1906_Water_Lilies.jpg,Monet,,Claude Monet,1840–1926,Water Lilies,1906,Oil on canvas,One of Monet's most celebrated series.
+Monet_1877_Gare_Saint_Lazare.jpg,Monet,,Claude Monet,1840–1926,Gare Saint-Lazare,1877,Oil on canvas,Painted as part of a series on light and atmosphere.
+```
+
+**Example `artwork_data.csv` — multi-artist collection** (`collection_name` must be identical on every row in the folder):
+```csv
+artwork_file,artwork_dir,collection_name,artist_name,artist_lifespan,artwork_title,artwork_year,artwork_medium,artwork_description
+Monet_1906_Water_Lilies.jpg,Impressionism,Impressionism,Claude Monet,1840–1926,Water Lilies,1906,Oil on canvas,
+Degas_1877_Dance_Class.jpg,Impressionism,Impressionism,Edgar Degas,1834–1917,The Dance Class,1874,Oil on canvas,
+Pissarro_1870_Lordship_Lane.jpg,Impressionism,Impressionism,Camille Pissarro,1830–1903,Lordship Lane Station,1871,Oil on canvas,
 ```
 
 ---
