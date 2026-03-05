@@ -7,20 +7,26 @@
   <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
   <style>
     /* Theme */
+    html {
+      background: #12100f;
+    }
     body {
       font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, 'Fira Sans', 'Droid Sans', 'Helvetica Neue', Arial, sans-serif;
       margin: 0;
+      min-height: 100vh;
       background: #12100f; /* dark brown/gray */
       color: #e9e4df;
     }
     .wrap {
       max-width: 1100px;
+      height: 100vh;
       margin: 0 auto;
-      padding: 20px 20px 28px; /* add horizontal padding like top/bottom */
+      padding: 20px 20px 28px;
       display: flex;
       flex-direction: column;
-      align-items: center; /* center components */
+      align-items: center;
       gap: 16px;
+      box-sizing: border-box;
     }
     /* Respect mobile safe areas (iOS notches) */
     @supports (padding: max(0px)) {
@@ -35,13 +41,19 @@
     }
     .card {
       width: 100%;
-      max-width: 980px; /* ensure dynamic width on small screens */
+      max-width: 980px;
       background: #1e1a18; /* dark brown */
-      border: 1px solid #3a2f2a; /* subtle border */
+      border: 1px solid #3a2f2a;
       border-radius: 12px;
       padding: 16px;
       box-shadow: 0 8px 20px rgba(0,0,0,0.35);
-      box-sizing: border-box; /* prevent padding/border from causing overflow */
+      box-sizing: border-box;
+    }
+    .control-card {
+      flex: 1 1 0;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
     }
     h1 { font-size: 20px; margin: 0 0 12px; color: #f0ece6; }
     .row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
@@ -56,12 +68,20 @@
 
     /* Always-visible artwork component */
     .display-card h1 { margin-bottom: 8px; }
-    .info { margin-top: 6px; }
     .title { font-size: 1.1em; letter-spacing: .5px; line-height: 1.3; }
     .title .year { font-size: .9em; color: rgba(255,255,255,.7); }
     .line { font-size: .9em; color: rgba(255,255,255,.7); line-height: 1.4; margin-top: 4px; }
-    .bg { margin-top: 12px; width: 100%; border-radius: 8px; background-color: #0d0c0b; overflow: hidden; border: 1px solid #3a2f2a; }
+    .bg { width: 100%; border-radius: 8px; background-color: #0d0c0b; overflow: hidden; border: 1px solid #3a2f2a; }
     .bg img { width: 100%; height: auto; display: block; border-radius: 8px; }
+    #refresh-log { margin-top: 10px; font-size: 0.85em; color: #b6aba4; line-height: 1.6; }
+    /* Now Playing layout: flex column with order so standby text sits above the image */
+    #viewNowPlaying { display: flex; flex-direction: column; }
+    #viewNowPlaying .bg   { order: 1; }
+    #viewNowPlaying .info { order: 2; margin-top: 12px; }
+    #viewNowPlaying #refresh-log { order: 3; }
+    /* Standby mode: text above image */
+    #viewNowPlaying.standby-mode .info { order: 1; margin-top: 0; }
+    #viewNowPlaying.standby-mode .bg   { order: 2; margin-top: 10px; }
 
     /* Tabs styled like folder (pentaflex) tabs */
     .tabbar { display: flex; gap: 6px; margin: 0 0 0 4px; }
@@ -85,19 +105,96 @@
       border-radius: 0 12px 12px 12px;
       padding: 14px;
       background: #1e1a18;
+      flex: 1 1 0;
+      min-height: 0;
+      overflow-y: auto;
     }
 
     /* Responsive layout to avoid horizontal overflow on phones */
     @media (max-width: 600px) {
-      /* Stack controls in Control view */
-      #viewControl .row select { flex: 1 1 100%; }
-      #viewControl .row button { flex: 1 1 100%; }
-
       /* Stack inputs in Settings view */
       #viewSettings .row > * { flex: 1 1 100%; }
 
       /* Allow tabs to wrap if needed */
       .tabbar { flex-wrap: wrap; }
+    }
+
+    /* ── Slideshow tab ── */
+    /* Toggle switch */
+    .sl-switch { position: relative; display: inline-block; width: 44px; height: 24px; flex-shrink: 0; }
+    .sl-switch input { opacity: 0; width: 0; height: 0; }
+    .sl-slider {
+      position: absolute; cursor: pointer; inset: 0;
+      background: #3a2f2a; border: 1px solid #4a3d37; border-radius: 24px;
+      transition: background 0.2s;
+    }
+    .sl-slider::before {
+      content: ""; position: absolute; width: 18px; height: 18px; left: 2px; top: 2px;
+      background: #b6aba4; border-radius: 50%; transition: transform 0.2s, background 0.2s;
+    }
+    .sl-switch input:checked + .sl-slider { background: #2f7fbf; border-color: #2f7fbf; }
+    .sl-switch input:checked + .sl-slider::before { transform: translateX(20px); background: #fff; }
+
+    /* Thumbnail grid */
+    .sl-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(var(--sl-min, 130px), 1fr));
+      gap: 10px;
+      margin-top: 10px;
+    }
+    .sl-section-header {
+      grid-column: 1 / -1;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      color: #b6aba4;
+      padding: 6px 2px 4px;
+      border-bottom: 1px solid #3a2f2a;
+      margin-top: 4px;
+      cursor: pointer;
+      user-select: none;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .sl-section-header:first-child { margin-top: 0; }
+    .sl-chevron { font-size: 9px; transition: transform 0.15s; display: inline-block; flex-shrink: 0; }
+    .sl-section-header.open .sl-chevron { transform: rotate(90deg); }
+    .sl-section-count { font-size: 10px; margin-left: auto; font-weight: normal; text-transform: none; letter-spacing: 0; }
+    .sl-section-body { display: contents; }
+    .sl-section-body.collapsed { display: none; }
+    .sl-thumb {
+      position: relative; border-radius: 8px; overflow: hidden; cursor: pointer;
+      border: 2px solid transparent; background: #0d0c0b;
+      transition: border-color 0.15s;
+    }
+    .sl-thumb:hover { border-color: #5b4a44; }
+    .sl-thumb.selected { border-color: #2f7fbf; }
+    .sl-thumb.disabled { opacity: 0.4; cursor: not-allowed; }
+    .sl-thumb img { width: 100%; aspect-ratio: 16/9; object-fit: cover; display: block; }
+    .sl-thumb-check {
+      position: absolute; top: 4px; right: 4px;
+      width: 22px; height: 22px; border-radius: 50%;
+      background: rgba(0,0,0,0.55); border: 2px solid #4a3d37;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 13px; font-weight: bold; color: #fff;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .sl-thumb.selected .sl-thumb-check { background: #2f7fbf; border-color: #2f7fbf; }
+    /* Size slider */
+    .sl-size-slider {
+      -webkit-appearance: none; appearance: none;
+      width: 90px; height: 4px; border-radius: 2px;
+      background: #4a3d37; outline: none; cursor: pointer;
+    }
+    .sl-size-slider::-webkit-slider-thumb {
+      -webkit-appearance: none; width: 14px; height: 14px;
+      border-radius: 50%; background: #2f7fbf; cursor: pointer;
+    }
+    .sl-size-slider::-moz-range-thumb {
+      width: 14px; height: 14px; border: none;
+      border-radius: 50%; background: #2f7fbf; cursor: pointer;
     }
 
     /* Dropdown multi-select styling (aligns with HA card visuals) */
@@ -129,11 +226,11 @@
     /* Mobile layout: place buttons below dropdown, side by side.
        Ensure up to three controls (refresh/apply/clear) share the row equally. */
     @media (max-width: 600px) {
-      #viewControl .ftv-row { flex-wrap: wrap; }
-      #viewControl .ftv-dropdown-wrap { flex: 1 1 100%; }
-      #viewControl #refresh,
-      #viewControl .ftv-apply,
-      #viewControl .ftv-clear {
+      #viewSlideshow .ftv-row { flex-wrap: wrap; }
+      #viewSlideshow .ftv-dropdown-wrap { flex: 1 1 100%; }
+      #viewSlideshow #refresh,
+      #viewSlideshow .ftv-apply,
+      #viewSlideshow .ftv-clear {
         /* Let buttons distribute evenly on the same line regardless of count */
         flex: 1 1 0;
         min-width: 0;
@@ -149,12 +246,29 @@
     <!-- Control/Settings component with folder-style tabs -->
     <div class="card control-card">
       <div class="tabbar">
-        <div class="tab active" data-tab="control">Control</div>
+        <div class="tab active" data-tab="nowplaying">Now Showing</div>
+        <div class="tab" data-tab="slideshow">Slideshow</div>
         <div class="tab" data-tab="settings">Settings</div>
       </div>
       <div class="tabcontent">
-        <div id="viewControl">
-          <h1 style="display:flex;justify-content:space-between;align-items:baseline;">Frame TV Art <span style="font-size:11px;font-weight:400;color:#7a7575;">v0.1.4-beta.3</span></h1>
+        <div id="viewNowPlaying">
+          <div class="bg" id="bg"></div>
+          <div class="info" id="info"></div>
+          <div id="refresh-log"></div>
+        </div>
+        <div id="viewSettings" style="display:none;">
+          <h1>Settings</h1>
+          <div class="hint">MQTT WebSocket defaults come from env.json and persisted overrides; changes here are saved.</div>
+          <div class="row" style="margin-top:8px; align-items: stretch; gap: 6px;">
+            <input id="broker" placeholder="ws://host:9001" style="flex:2; padding:10px; background:#2a2623; color:#f2eee9; border:1px solid #4a3d37; border-radius:8px;" />
+            <input id="user" placeholder="username (optional)" style="flex:1; padding:10px; background:#2a2623; color:#f2eee9; border:1px solid #4a3d37; border-radius:8px;" />
+            <input id="pass" type="password" placeholder="password (optional)" style="flex:1; padding:10px; background:#2a2623; color:#f2eee9; border:1px solid #4a3d37; border-radius:8px;" />
+            <button id="connect">Connect</button>
+          </div>
+        </div>
+        <div id="viewSlideshow" style="display:none;">
+          <h1>Slideshow</h1>
+          <!-- Collection picker -->
           <div class="row">
             <div class="ftv-controls" style="flex:1;">
               <div class="ftv-row">
@@ -177,26 +291,48 @@
               </div>
             </div>
           </div>
-          <!-- Removed per-request: selected hint below control; trigger now shows current selection -->
-        </div>
-        <div id="viewSettings" style="display:none;">
-          <h1>Settings</h1>
-          <div class="hint">MQTT WebSocket defaults come from env.json and persisted overrides; changes here are saved.</div>
-          <div class="row" style="margin-top:8px; align-items: stretch; gap: 6px;">
-            <input id="broker" placeholder="ws://host:9001" style="flex:2; padding:10px; background:#2a2623; color:#f2eee9; border:1px solid #4a3d37; border-radius:8px;" />
-            <input id="user" placeholder="username (optional)" style="flex:1; padding:10px; background:#2a2623; color:#f2eee9; border:1px solid #4a3d37; border-radius:8px;" />
-            <input id="pass" type="password" placeholder="password (optional)" style="flex:1; padding:10px; background:#2a2623; color:#f2eee9; border:1px solid #4a3d37; border-radius:8px;" />
-            <button id="connect">Connect</button>
+          <!-- Slideshow settings row -->
+          <div class="row" style="margin-top:12px; align-items:stretch; gap:8px;">
+            <select id="sl-type" style="flex:1; padding:10px; background:#2a2623; color:#f2eee9; border:1px solid #4a3d37; border-radius:8px;">
+              <option value="random">Random</option>
+              <option value="sequential">Sequential</option>
+            </select>
+            <input id="sl-interval" type="number" min="0" placeholder="Interval (min, 0=off)" style="flex:1; padding:10px; background:#2a2623; color:#f2eee9; border:1px solid #4a3d37; border-radius:8px;" />
+            <input id="sl-max-uploads" type="number" min="1" placeholder="Max uploads" style="flex:1; padding:10px; background:#2a2623; color:#f2eee9; border:1px solid #4a3d37; border-radius:8px;" />
+            <button id="sl-settings-apply" disabled style="opacity:0.6;">Apply</button>
           </div>
+          <div class="hint" style="margin-top:4px;">Interval: minutes between changes (0=disabled). Max uploads: artwork stored on TV.</div>
+          <!-- Override toggle -->
+          <div style="display:flex; align-items:center; gap:10px; margin-top:14px;">
+            <label class="sl-switch">
+              <input type="checkbox" id="sl-override-toggle" disabled>
+              <span class="sl-slider" style="opacity:0.4;"></span>
+            </label>
+            <span style="color:#f0ece6; font-size:14px;">Override auto slideshow</span>
+            <span id="sl-mode-badge" class="hint" style="margin-left:auto;"></span>
+          </div>
+          <!-- Override panel (shown when toggle is on) -->
+          <div id="sl-override-panel" style="display:none; margin-top:12px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+              <span id="sl-counter" class="hint">0 / 10 selected</span>
+              <div style="display:flex; align-items:center; gap:10px;">
+                <input type="range" id="sl-size" class="sl-size-slider" min="80" max="260" value="130" title="Thumbnail size">
+                <button id="sl-override-apply" class="ftv-apply" disabled style="opacity:0.6; padding:8px 14px; width:auto; height:auto;">Apply Override</button>
+                <button id="sl-override-clear" class="ftv-clear" style="padding:8px 14px; width:auto; height:auto;">Clear Override</button>
+              </div>
+            </div>
+            <div id="sl-grid" class="sl-grid"></div>
+            <div id="sl-grid-hint" class="hint" style="margin-top:6px;"></div>
+            <div id="sl-uploading-warn" style="display:none; margin-top:10px; padding:10px 12px; background:#3a2800; border:1px solid #7a5500; border-radius:8px; color:#f0c060; font-size:13px;">
+              ⏳ TV is currently updating artwork — override cannot be applied until the update finishes.
+            </div>
+          </div>
+          <div id="sl-msg" class="hint" style="margin-top:8px;"></div>
         </div>
       </div>
     </div>
 
-    <!-- Always-visible artwork component -->
-    <div class="card display-card">
-      <div class="info" id="info"></div>
-      <div class="bg" id="bg"></div>
-    </div>
+
   </div>
   <script>
     // Settings helpers (localStorage + query param override)
@@ -240,7 +376,7 @@
       try { if (client) client.end(true); } catch (_) {}
       client = mqtt.connect(broker, { username, password });
       client.on('connect', () => {
-        client.subscribe([TOPIC_ATTR, TOPIC_STATE, TOPIC_COLL_ATTR, TOPIC_SELECTED, TOPIC_SETTINGS_ATTR, `${TOPIC_ACK_PREFIX}/#`]);
+        client.subscribe([TOPIC_ATTR, TOPIC_STATE, TOPIC_COLL_ATTR, TOPIC_SELECTED, TOPIC_SETTINGS_ATTR, TOPIC_SLIDESHOW_STATE, TOPIC_SLIDESHOW_ATTR, TOPIC_SLIDESHOW_AVAIL, `${TOPIC_ACK_PREFIX}/#`]);
       });
       client.on('message', (topic, payload) => {
         try {
@@ -261,6 +397,20 @@
           if (topic === TOPIC_SETTINGS_ATTR) {
             const attrs = JSON.parse(payload.toString() || '{}');
             loadEnvFromMqtt(attrs);
+          }
+          if (topic === TOPIC_SLIDESHOW_ATTR) {
+            try { updateSlideshowState(JSON.parse(payload.toString() || '{}')); } catch(_) {}
+          }
+          if (topic === TOPIC_SLIDESHOW_AVAIL) {
+            try {
+              const d = JSON.parse(payload.toString() || '{}');
+              slideshowAvailable = d.images || [];
+              // If override is active and selection was never seeded, seed it now
+              if ($slToggle && $slToggle.checked && slideshowSelected.size === 0 && slideshowOverridePaths.length) {
+                slideshowSelected = new Set(slideshowOverridePaths);
+              }
+              renderSlideshowGrid();
+            } catch(_) {}
           }
           if (topic.startsWith(`${TOPIC_ACK_PREFIX}/`)) {
             try {
@@ -294,9 +444,25 @@
                   setTimeout(() => {
                     refreshInProgress = false;
                     refreshLog = [];
+                    try { sessionStorage.removeItem('ftvRefreshLog'); sessionStorage.removeItem('ftvRefreshActive'); } catch(_) {}
                     setInfo(lastAttrs || {});
                   }, status === 'ok' ? 8000 : 12000);
                 }
+              }
+              if (cmd === 'slideshow/settings/set') {
+                const $m = document.getElementById('sl-msg');
+                if ($m) { $m.textContent = status === 'ok' ? 'Settings saved.' : `Error: ${ack.message||'unknown'}`; setTimeout(()=>{ if($m) $m.textContent=''; },5000); }
+              }
+              if (cmd === 'slideshow/override/set') {
+                const $m = document.getElementById('sl-msg');
+                if ($m) {
+                  if (status === 'progress') { $m.textContent = ack.message || 'Loading...'; }
+                  else { $m.textContent = status === 'ok' ? 'Override applied.' : `Error: ${ack.message||'unknown'}`; setTimeout(()=>{ if($m) $m.textContent=''; },5000); }
+                }
+              }
+              if (cmd === 'slideshow/override/clear') {
+                const $m = document.getElementById('sl-msg');
+                if ($m) { $m.textContent = status === 'ok' ? 'Override cleared. Auto mode restored.' : `Error: ${ack.message||'unknown'}`; setTimeout(()=>{ if($m) $m.textContent=''; },5000); }
               }
               setTimeout(() => { if ($envMsg.textContent) $envMsg.textContent=''; }, 8000);
             } catch (e) { /* ignore */ }
@@ -317,6 +483,9 @@
     const TOPIC_COLL_ATTR = 'frame_tv/collections/attributes';
     const TOPIC_SELECTED = 'frame_tv/selected_collections/state';
     const TOPIC_SETTINGS_ATTR = 'frame_tv/settings/attributes';
+    const TOPIC_SLIDESHOW_STATE = 'frame_tv/slideshow/state';
+    const TOPIC_SLIDESHOW_ATTR  = 'frame_tv/slideshow/attributes';
+    const TOPIC_SLIDESHOW_AVAIL = 'frame_tv/slideshow/available';
     const TOPIC_CMD_PREFIX = 'frame_tv/cmd';
     const $refresh = document.getElementById('refresh');
     const TOPIC_ACK_PREFIX = 'frame_tv/ack';
@@ -434,13 +603,53 @@
     let refreshInProgress = false;
     let lastAttrs = null;
     let refreshLog = [];
+    let _refreshSafetyTimer = null;
 
     function renderRefreshLog() {
-      $info.innerHTML = refreshLog.map(l => `<div>${l}</div>`).join('');
+      // Cancel the stale-state safety timer — a real ack just arrived
+      if (_refreshSafetyTimer) { clearTimeout(_refreshSafetyTimer); _refreshSafetyTimer = null; }
+      // Standby mode: text above image
+      const $np = document.getElementById('viewNowPlaying');
+      if ($np) $np.classList.add('standby-mode');
+      const $log = document.getElementById('refresh-log');
+      $info.innerHTML = refreshLog.length ? `<div>${refreshLog[0]}</div>` : '';
+      if ($log) $log.innerHTML = refreshLog.slice(1).map(l => `<div>${l}</div>`).join('');
+      try { sessionStorage.setItem('ftvRefreshLog', JSON.stringify({ log: refreshLog, ts: Date.now() })); sessionStorage.setItem('ftvRefreshActive', '1'); } catch(_) {}
     }
+    // Restore refresh log if page was refreshed while a sync was in progress (max 15 min TTL)
+    try {
+      const _raw = sessionStorage.getItem('ftvRefreshLog');
+      if (_raw && sessionStorage.getItem('ftvRefreshActive')) {
+        const _entry = JSON.parse(_raw);
+        const _age = Date.now() - (_entry.ts || 0);
+        if (_age < 15 * 60 * 1000) {
+          refreshLog = _entry.log || [];
+          refreshInProgress = true;
+          if ($bg) $bg.innerHTML = `<img src="${location.origin}/app/standby.default.png" alt="standby">`;
+          renderRefreshLog();
+          // Safety valve: if no new refresh ack arrives within 30s the sync is
+          // already done — clear the stale state so the UI recovers automatically.
+          _refreshSafetyTimer = setTimeout(() => {
+            if (refreshInProgress) {
+              refreshInProgress = false;
+              refreshLog = [];
+              try { sessionStorage.removeItem('ftvRefreshLog'); sessionStorage.removeItem('ftvRefreshActive'); } catch(_) {}
+              const $log = document.getElementById('refresh-log');
+              if ($log) $log.innerHTML = '';
+              setInfo(lastAttrs || {});
+            }
+          }, 30000);
+        } else {
+          sessionStorage.removeItem('ftvRefreshLog'); sessionStorage.removeItem('ftvRefreshActive');
+        }
+      }
+    } catch(_) {}
 
     function setInfo(attrs) {
       if (refreshInProgress) return;
+      const $np = document.getElementById('viewNowPlaying');
+      const $log = document.getElementById('refresh-log');
+      if ($log) $log.innerHTML = '';
       const title = attrs.artwork_title || '';
       const year = attrs.artwork_year || '';
       const artist = attrs.artist_name || '';
@@ -457,8 +666,10 @@
 
       let t = '';
       if (isStandbyLike) {
+        if ($np) $np.classList.add('standby-mode');
         t = 'Please stand by as artwork is loaded...';
       } else {
+        if ($np) $np.classList.remove('standby-mode');
         t = `
           ${artistLine ? `<div style=\"line-height:1.3; margin-top: 2px;\">${artistLine}</div>` : ''}
           <div style=\"line-height:1.3; margin-top: 8px;\"><em style=\"font-size:1.1em; color: white;\">${formatInline(title || file || 'Selected Artwork')}</em>${year ? `<span style=\"font-size:0.9em; color: rgba(255,255,255,0.7);\">, ${escapeHtml(year)}</span>` : ''}</div>
@@ -564,32 +775,27 @@
     }
 
     // Tabs (folder style)
-    const $viewControl = document.getElementById('viewControl');
+    const $viewNowPlaying = document.getElementById('viewNowPlaying');
     const $viewSettings = document.getElementById('viewSettings');
+    const $viewSlideshow = document.getElementById('viewSlideshow');
     const $tabs = document.querySelectorAll('.tabbar .tab');
     function show(tabKey) {
-      const isControl = tabKey === 'control';
-      $viewControl.style.display = isControl ? '' : 'none';
-      $viewSettings.style.display = isControl ? 'none' : '';
+      $viewNowPlaying.style.display = tabKey === 'nowplaying' ? '' : 'none';
+      $viewSettings.style.display = tabKey === 'settings' ? '' : 'none';
+      $viewSlideshow.style.display = tabKey === 'slideshow' ? '' : 'none';
       $tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === tabKey));
     }
     $tabs.forEach(t => t.addEventListener('click', () => show(t.dataset.tab)));
-    show('control');
+    show('nowplaying');
 
     // --- Settings: Manage uploader env overrides ---
-    const $maxUploads = document.createElement('input');
-    const $updateMins = document.createElement('input');
     const $tvIp = document.createElement('input');
     const $applyEnv = document.createElement('button');
     const $restartEnv = document.createElement('button');
     const $syncCollections = document.createElement('button');
-    $maxUploads.type = 'number'; $maxUploads.min = '1'; $maxUploads.placeholder = 'e.g. 30';
-    $updateMins.type = 'number'; $updateMins.min = '0'; $updateMins.placeholder = 'e.g. 30';
     $tvIp.type = 'text'; $tvIp.placeholder = 'e.g. 10.83.21.57';
     // Match MQTT input styling
     const inputStyle = 'flex:1; padding:10px; background:#2a2623; color:#f2eee9; border:1px solid #4a3d37; border-radius:8px;';
-    $maxUploads.style = inputStyle;
-    $updateMins.style = inputStyle;
     $tvIp.style = inputStyle;
     $applyEnv.textContent = 'Apply & Refresh';
     $applyEnv.style.marginTop = '8px';
@@ -619,11 +825,6 @@
       return wrap;
     }
     // Split rows: TV IP directly after MQTT fields; other env below
-    const $envRow = document.createElement('div');
-    $envRow.className = 'row';
-    $envRow.style.marginTop = '8px';
-    $envRow.appendChild(makeField('Max uploads', $maxUploads));
-    $envRow.appendChild(makeField('Interval minutes', $updateMins));
     const $tvRow = document.createElement('div');
     $tvRow.className = 'row';
     $tvRow.style.marginTop = '8px';
@@ -636,7 +837,6 @@
       } else {
         $settingsView.appendChild($tvRow);
       }
-      $settingsView.appendChild($envRow);
       const $btnRow = document.createElement('div');
       $btnRow.className = 'row';
       $btnRow.style.gap = '8px';
@@ -649,29 +849,25 @@
     let envBaseline = {};
     function markEnvDirty() {
       const changed = (
-        String($maxUploads.value||'') !== String(envBaseline.SAMSUNG_TV_ART_MAX_UPLOADS||'') ||
-        String($updateMins.value||'') !== String(envBaseline.SAMSUNG_TV_ART_UPDATE_MINUTES||'') ||
         String($tvIp.value||'') !== String(envBaseline.SAMSUNG_TV_ART_TV_IP||'')
       );
       $applyEnv.disabled = !changed; $applyEnv.style.opacity = changed ? 1 : 0.6;
     }
-    $maxUploads.addEventListener('input', markEnvDirty);
-    $updateMins.addEventListener('input', markEnvDirty);
     $tvIp.addEventListener('input', markEnvDirty);
     // Load current settings from MQTT attributes topic
     function loadEnvFromMqtt(attrs) {
       try {
         envBaseline = attrs || {};
-        $maxUploads.value = attrs.SAMSUNG_TV_ART_MAX_UPLOADS || '';
-        $updateMins.value = attrs.SAMSUNG_TV_ART_UPDATE_MINUTES || '';
         $tvIp.value = attrs.SAMSUNG_TV_ART_TV_IP || '';
         markEnvDirty();
+        // Populate slideshow fields from env attrs
+        const $slMaxU = document.getElementById('sl-max-uploads');
+        if ($slMaxU && !$slMaxU.dataset.dirty) $slMaxU.value = attrs.SAMSUNG_TV_ART_MAX_UPLOADS || '';
+        markSlSettingsDirty();
       } catch (_) {}
     }
     $applyEnv.onclick = () => {
       const payload = {
-        SAMSUNG_TV_ART_MAX_UPLOADS: String($maxUploads.value||'').trim(),
-        SAMSUNG_TV_ART_UPDATE_MINUTES: String($updateMins.value||'').trim(),
         SAMSUNG_TV_ART_TV_IP: String($tvIp.value||'').trim(),
       };
       client.publish(`${TOPIC_CMD_PREFIX}/settings/set`, JSON.stringify(payload), { qos: 1, retain: false });
@@ -689,6 +885,7 @@
     };
     $syncCollections.onclick = () => {
       const reqId = Date.now();
+      if (_refreshSafetyTimer) { clearTimeout(_refreshSafetyTimer); _refreshSafetyTimer = null; }
       refreshInProgress = true;
       refreshLog = ['Please stand by as artwork is loaded...', 'Fetching latest collection updates...'];
       renderRefreshLog();
@@ -696,6 +893,239 @@
       $bg.innerHTML = `<img src="${standbyUrl}" alt="standby">`;
       client.publish(`${TOPIC_CMD_PREFIX}/settings/sync_collections`, JSON.stringify({ req_id: reqId }), { qos: 1, retain: false });
     };
+
+    // ── Slideshow tab ──────────────────────────────────────────────────────
+    const $slType       = document.getElementById('sl-type');
+    const $slInterval   = document.getElementById('sl-interval');
+    const $slMaxUploads = document.getElementById('sl-max-uploads');
+    const $slApply      = document.getElementById('sl-settings-apply');
+    const $slToggle    = document.getElementById('sl-override-toggle');
+    const $slPanel     = document.getElementById('sl-override-panel');
+
+    function requestSlideshowAvailable() {
+      if (client) client.publish(`${TOPIC_CMD_PREFIX}/slideshow/available/request`, JSON.stringify({ req_id: Date.now() }), { qos: 1 });
+    }
+
+    const $slCounter   = document.getElementById('sl-counter');
+    const $slOApply    = document.getElementById('sl-override-apply');
+    const $slOClear    = document.getElementById('sl-override-clear');
+    const $slGrid      = document.getElementById('sl-grid');
+    const $slGridHint  = document.getElementById('sl-grid-hint');
+    const $slSize      = document.getElementById('sl-size');
+    if ($slSize && $slGrid) {
+      $slSize.addEventListener('input', () => {
+        $slGrid.style.setProperty('--sl-min', $slSize.value + 'px');
+      });
+    }
+
+    let slideshowAvailable = [];
+    let slideshowCurrentPaths = [];
+    let slideshowOverridePaths = [];
+    let slideshowSelected = new Set();
+    let slideshowMaxUploads = 10;
+    let slSeqBaseline = false;
+    let slIntervalBaseline = 0;
+    let slMaxUploadsBaseline = 10;
+
+    let slideshowUploading = false;
+
+    function updateSlideshowState(data) {
+      try {
+        slideshowUploading = !!(data.uploading);
+        slideshowMaxUploads = parseInt(data.max_uploads || 10, 10);
+        if ($slMaxUploads && !$slMaxUploads.dataset.dirty) $slMaxUploads.value = slideshowMaxUploads;
+        slideshowCurrentPaths = data.current_paths || [];
+        slideshowOverridePaths = data.override_paths || [];
+        const mode = data.mode || 'auto';
+        const isOverride = mode === 'override';
+        const $badge = document.getElementById('sl-mode-badge');
+        if ($badge) { $badge.textContent = isOverride ? '● Override active' : ''; $badge.style.color = '#2f7fbf'; }
+        // Sync toggle to server state without triggering change event
+        if ($slToggle && $slToggle.checked !== isOverride) {
+          $slToggle.checked = isOverride;
+          if ($slPanel) $slPanel.style.display = isOverride ? '' : 'none';
+        }
+        // Pre-fill settings inputs if not dirty
+        slSeqBaseline = !!(data.sequential);
+        slIntervalBaseline = parseInt(data.update_minutes || 0, 10);
+        slMaxUploadsBaseline = slideshowMaxUploads;
+        if ($slType && !$slType.dataset.dirty) $slType.value = slSeqBaseline ? 'sequential' : 'random';
+        if ($slInterval && !$slInterval.dataset.dirty) $slInterval.value = slIntervalBaseline;
+        if ($slMaxUploads && !$slMaxUploads.dataset.dirty) $slMaxUploads.value = slideshowMaxUploads;
+        markSlSettingsDirty();
+        // If override active and available list loaded, seed selection from override paths
+        if (isOverride && slideshowAvailable.length) {
+          slideshowSelected = new Set(slideshowOverridePaths);
+          renderSlideshowGrid();
+        }
+        updateSlCounter();
+        // Lock/unlock override toggle based on uploading state
+        // If override was active before restart (mode='override'), keep panel accessible but lock Apply
+        // If no override was set and uploading, prevent enabling override mid-upload
+        const $warn = document.getElementById('sl-uploading-warn');
+        if ($warn) $warn.style.display = slideshowUploading ? '' : 'none';
+        if ($slGrid) $slGrid.style.pointerEvents = slideshowUploading ? 'none' : '';
+        if ($slGrid) $slGrid.style.opacity = slideshowUploading ? '0.45' : '';
+        if ($slToggle) {
+        // Lock toggle when uploading OR when TV is still on standby (stale retained
+        // MQTT message could arrive with uploading=false before startup completes)
+        const artworkFile = String((lastAttrs && lastAttrs.file) || '').trim().toLowerCase();
+        const isStandbyFile = !artworkFile || ['standby.png', 'unknown', 'unavailable', 'none', ''].includes(artworkFile);
+        const allowToggle = (!slideshowUploading && !isStandbyFile) || isOverride;
+          $slToggle.disabled = !allowToggle;
+          $slToggle.closest('.sl-switch').style.opacity = allowToggle ? 1 : 0.4;
+          $slToggle.closest('.sl-switch').title = !allowToggle ? (slideshowUploading ? 'Uploading in progress — wait until complete' : 'Unavailable until artwork is loaded') : '';
+          const $slider = $slToggle.closest('.sl-switch').querySelector('.sl-slider');
+          if ($slider) $slider.style.opacity = '';
+        }
+        if ($slOApply) {
+          if (slideshowUploading) { $slOApply.disabled = true; $slOApply.style.opacity = 0.4; }
+        }
+      } catch (_) {}
+    }
+
+    function markSlSettingsDirty() {
+      if (!$slType || !$slInterval || !$slApply) return;
+      const seq = $slType.value === 'sequential';
+      const mins = parseInt($slInterval.value || '0', 10);
+      const maxU = parseInt($slMaxUploads ? ($slMaxUploads.value || '10') : '10', 10);
+      const dirty = seq !== slSeqBaseline || mins !== slIntervalBaseline || maxU !== slMaxUploadsBaseline;
+      $slApply.disabled = !dirty;
+      $slApply.style.opacity = dirty ? 1 : 0.6;
+    }
+
+    function updateSlCounter() {
+      if (!$slCounter) return;
+      const count = slideshowSelected.size;
+      $slCounter.textContent = `${count} / ${slideshowMaxUploads} selected`;
+      if ($slOApply) {
+        const canApply = count > 0 && !slideshowUploading;
+        $slOApply.disabled = !canApply;
+        $slOApply.style.opacity = canApply ? 1 : (slideshowUploading ? 0.4 : 0.6);
+      }
+    }
+
+    function renderSlideshowGrid() {
+      if (!$slGrid) return;
+      if (!slideshowAvailable.length) {
+        $slGrid.innerHTML = '';
+        if ($slGridHint) $slGridHint.textContent = 'No images found. Make sure collections are selected above.';
+        return;
+      }
+      if ($slGridHint) $slGridHint.textContent = `${slideshowAvailable.length} image(s) in selected collections`;
+      const atMax = slideshowSelected.size >= slideshowMaxUploads;
+
+      function thumbHtml(img) {
+        const isSelected = slideshowSelected.has(img.path);
+        const isDisabled = !isSelected && atMax;
+        const thumbUrl = `${location.origin}/app/frame_tv_art_collections/${encodeURIComponent(img.folder)}/${encodeURIComponent(img.file)}`;
+        return `<div class="sl-thumb${isSelected ? ' selected' : ''}${isDisabled ? ' disabled' : ''}" data-path="${escapeHtml(img.path)}">
+          <img src="${thumbUrl}" loading="lazy" alt="${escapeHtml(img.title || img.file)}" onerror="this.style.display='none'">
+          <div class="sl-thumb-check">${isSelected ? '\u2713' : ''}</div>
+        </div>`;
+      }
+
+      let sectionIdx = 0;
+      function sectionHtml(label, images, expanded) {
+        const bodyId = `sl-body-${sectionIdx++}`;
+        return `<div class="sl-section-header${expanded ? ' open' : ''}" data-body="${bodyId}">
+          <span class="sl-chevron">&#9654;</span>${escapeHtml(label)}<span class="sl-section-count hint">${images.length}</span>
+        </div>
+        <div class="sl-section-body${expanded ? '' : ' collapsed'}" id="${bodyId}">${images.map(thumbHtml).join('')}</div>`;
+      }
+
+      const selected = slideshowAvailable.filter(img => slideshowSelected.has(img.path));
+      const unselected = slideshowAvailable.filter(img => !slideshowSelected.has(img.path));
+      const byArtist = {};
+      for (const img of unselected) {
+        const key = img.artist && img.artist.trim() ? img.artist.trim() : (img.folder || 'Unknown');
+        if (!byArtist[key]) byArtist[key] = [];
+        byArtist[key].push(img);
+      }
+
+      let html = '';
+      if (selected.length) {
+        html += sectionHtml(`Selected (${selected.length})`, selected, true);
+      }
+      for (const [artist, images] of Object.entries(byArtist).sort(([a],[b]) => a.localeCompare(b))) {
+        html += sectionHtml(artist, images, false);
+      }
+      $slGrid.innerHTML = html;
+
+      // Wire collapsible headers
+      $slGrid.querySelectorAll('.sl-section-header').forEach(hdr => {
+        hdr.addEventListener('click', () => {
+          const body = document.getElementById(hdr.dataset.body);
+          const open = hdr.classList.toggle('open');
+          if (body) body.classList.toggle('collapsed', !open);
+        });
+      });
+
+      $slGrid.querySelectorAll('.sl-thumb').forEach(el => {
+        el.addEventListener('click', () => {
+          if (el.classList.contains('disabled')) return;
+          if (slideshowUploading) return;
+          const path = el.dataset.path;
+          if (slideshowSelected.has(path)) { slideshowSelected.delete(path); }
+          else { if (slideshowSelected.size >= slideshowMaxUploads) return; slideshowSelected.add(path); }
+          updateSlCounter();
+          renderSlideshowGrid();
+        });
+      });
+    }
+
+    if ($slType) $slType.addEventListener('change', () => { $slType.dataset.dirty = 'y'; markSlSettingsDirty(); });
+    if ($slInterval) $slInterval.addEventListener('input', () => { $slInterval.dataset.dirty = 'y'; markSlSettingsDirty(); });
+    if ($slMaxUploads) $slMaxUploads.addEventListener('input', () => { $slMaxUploads.dataset.dirty = 'y'; markSlSettingsDirty(); });
+
+    if ($slApply) {
+      $slApply.onclick = () => {
+        if (!client) return;
+        const sequential = $slType.value === 'sequential';
+        const update_minutes = parseInt($slInterval.value || '0', 10);
+        const max_uploads = parseInt($slMaxUploads ? ($slMaxUploads.value || '10') : '10', 10);
+        client.publish(`${TOPIC_CMD_PREFIX}/slideshow/settings/set`, JSON.stringify({ sequential, update_minutes, req_id: Date.now() }), { qos: 1 });
+        client.publish(`${TOPIC_CMD_PREFIX}/settings/set`, JSON.stringify({ SAMSUNG_TV_ART_MAX_UPLOADS: String(max_uploads), SAMSUNG_TV_ART_UPDATE_MINUTES: String(update_minutes) }), { qos: 1 });
+        if ($slMaxUploads) { delete $slMaxUploads.dataset.dirty; slMaxUploadsBaseline = max_uploads; }
+        delete $slType.dataset.dirty; delete $slInterval.dataset.dirty;
+        slSeqBaseline = sequential; slIntervalBaseline = update_minutes;
+        markSlSettingsDirty();
+      };
+    }
+
+    if ($slToggle) {
+      $slToggle.addEventListener('change', () => {
+        const on = $slToggle.checked;
+        if ($slPanel) $slPanel.style.display = on ? '' : 'none';
+        if (on) {
+          requestSlideshowAvailable();
+          // Pre-seed selection from active override or current TV images
+          slideshowSelected = new Set(slideshowOverridePaths.length ? slideshowOverridePaths : slideshowCurrentPaths);
+          updateSlCounter();
+          renderSlideshowGrid();
+        } else {
+          if (client) client.publish(`${TOPIC_CMD_PREFIX}/slideshow/override/clear`, JSON.stringify({ req_id: Date.now() }), { qos: 1 });
+        }
+      });
+    }
+
+    if ($slOApply) {
+      $slOApply.onclick = () => {
+        if (!client || !slideshowSelected.size) return;
+        const paths = Array.from(slideshowSelected);
+        client.publish(`${TOPIC_CMD_PREFIX}/slideshow/override/set`, JSON.stringify({ paths, req_id: Date.now() }), { qos: 1 });
+      };
+    }
+
+    if ($slOClear) {
+      $slOClear.onclick = () => {
+        if (!client) return;
+        client.publish(`${TOPIC_CMD_PREFIX}/slideshow/override/clear`, JSON.stringify({ req_id: Date.now() }), { qos: 1 });
+        slideshowSelected = new Set();
+        if ($slToggle) $slToggle.checked = false;
+        if ($slPanel) $slPanel.style.display = 'none';
+      };
+    }
   </script>
 </body>
 </html>

@@ -26,3 +26,6 @@ samsung-tv-art.env
 # OS
 .DS_Store
 Thumbs.db
+
+# Local VS Code settings (personal tasks, deploy configs, etc.)
+.vscode/
