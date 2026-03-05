@@ -1,0 +1,68 @@
+name: Build and push Docker image
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract tag name
+        id: tag
+        run: echo "TAG=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
+
+      - name: Check if stable release (no pre-release suffix)
+        id: release_type
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          if echo "$TAG" | grep -qE '\-(alpha|beta|rc)'; then
+            echo "IS_STABLE=false" >> $GITHUB_OUTPUT
+          else
+            echo "IS_STABLE=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build and push (pre-release — versioned tag only)
+        if: steps.release_type.outputs.IS_STABLE == 'false'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ghcr.io/kohlerryan/samsung-tv-art:${{ steps.tag.outputs.TAG }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push (stable — versioned tag + latest)
+        if: steps.release_type.outputs.IS_STABLE == 'true'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/kohlerryan/samsung-tv-art:${{ steps.tag.outputs.TAG }}
+            ghcr.io/kohlerryan/samsung-tv-art:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
