@@ -20,6 +20,9 @@ samsung-tv-art.env
 # Logs
 *.log
 
+# Editor
+.vscode/
+
 # OS
 .DS_Store
 Thumbs.db

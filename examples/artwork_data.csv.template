@@ -1,4 +1,4 @@
-artwork_file,artwork_dir,artist_name,artist_lifespan,artwork_title,artwork_year,artwork_medium,artwork_description
-Monet_1906_Water_Lilies.jpg,Monet,Claude Monet,1840–1926,Water Lilies,1906,Oil on canvas,One of Monet's most celebrated series depicting the water garden at his estate in Giverny. **Water Lilies** was painted late in his life as his eyesight was failing.
-Monet_1877_Gare_Saint_Lazare.jpg,Monet,Claude Monet,1840–1926,Gare Saint-Lazare,1877,Oil on canvas,Monet painted *twelve* versions of this train station as part of a series exploring how light and atmosphere transformed industrial subjects.
-VanGogh_1889_Starry_Night.jpg,VanGogh,Vincent van Gogh,1853–1890,The Starry Night,1889,Oil on canvas,Painted from the window of Van Gogh's room at the ***Saint-Paul-de-Mausole*** asylum in Saint-Rémy-de-Provence — one month after his arrival.
+artwork_file,artwork_dir,collection_name,artist_name,artist_lifespan,artwork_title,artwork_year,artwork_medium,artwork_description
+Monet_1906_Water_Lilies.jpg,Monet,,Claude Monet,1840–1926,Water Lilies,1906,Oil on canvas,One of Monet's most celebrated series depicting the water garden at his estate in Giverny. **Water Lilies** was painted late in his life as his eyesight was failing.
+Monet_1877_Gare_Saint_Lazare.jpg,Monet,,Claude Monet,1840–1926,Gare Saint-Lazare,1877,Oil on canvas,Monet painted *twelve* versions of this train station as part of a series exploring how light and atmosphere transformed industrial subjects.
+VanGogh_1889_Starry_Night.jpg,VanGogh,,Vincent van Gogh,1853–1890,The Starry Night,1889,Oil on canvas,Painted from the window of Van Gogh's room at the ***Saint-Paul-de-Mausole*** asylum in Saint-Rémy-de-Provence — one month after his arrival.

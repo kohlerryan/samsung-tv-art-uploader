@@ -1998,19 +1998,21 @@ class monitor_and_display:
             opts = []
             if self.collections_from_csv and self._csv_headers and 'artist_name' in self._csv_headers and 'artwork_dir' in self._csv_headers:
                 try:
-                    # Build artist_name options only where mapped directory exists
+                    # Build collection label options; prefer collection_name over artist_name when present
                     pairs = set()
                     for row in self._csv_by_file.values():
                         an = (row.get('artist_name') or '').strip()
+                        cn = (row.get('collection_name') or '').strip()
                         dn = (row.get('artwork_dir') or '').strip()
-                        if an and dn and os.path.isdir(os.path.join(self.media_root, dn)):
-                            pairs.add(an.replace('_', ' '))
+                        label = cn if cn else an
+                        if label and dn and os.path.isdir(os.path.join(self.media_root, dn)):
+                            pairs.add(label.replace('_', ' '))
                     opts = sorted(pairs)
                     if not opts:
                         # Fallback to folders if CSV produced nothing usable
                         opts = self._scan_collections()
                     else:
-                        self.log.info('Publishing %d artists from CSV (labels), mapped to artwork_dir folders', len(opts))
+                        self.log.info('Publishing %d collections from CSV (labels), mapped to artwork_dir folders', len(opts))
                 except Exception as e:
                     self.log.warning('Failed to derive artist_name options from CSV; falling back to folders: %s', e)
                     opts = self._scan_collections()
@@ -2489,6 +2491,7 @@ class monitor_and_display:
                     # Build bidirectional mapping when columns exist
                     try:
                         an = (row.get('artist_name') or '').strip()
+                        cn = (row.get('collection_name') or '').strip()
                         dn = (row.get('artwork_dir') or '').strip()
                         if an and dn:
                             # Keep first-seen mapping to be stable
@@ -2503,8 +2506,19 @@ class monitor_and_display:
                                 n2 = self._normalize_collection_key(spaced)
                                 if n2 and n2 not in self._artist_to_dir:
                                     self._artist_to_dir[n2] = dn
+                            # Also map collection_name variants -> artwork_dir
+                            if cn and cn not in self._artist_to_dir:
+                                self._artist_to_dir[cn] = dn
+                                cn_spaced = cn.replace('_', ' ')
+                                if cn_spaced and cn_spaced not in self._artist_to_dir:
+                                    self._artist_to_dir[cn_spaced] = dn
+                                cn_n1 = self._normalize_collection_key(cn)
+                                if cn_n1 and cn_n1 not in self._artist_to_dir:
+                                    self._artist_to_dir[cn_n1] = dn
+                            # Prefer collection_name as the display label; fall back to artist_name
                             if dn not in self._dir_to_artist:
-                                    self._dir_to_artist[dn] = an.replace('_', ' ')
+                                label = cn if cn else an
+                                self._dir_to_artist[dn] = label.replace('_', ' ')
                     except Exception:
                         pass
             try:
