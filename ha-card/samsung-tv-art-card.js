@@ -1,5 +1,5 @@
 /**
- * Frame TV Art Card v0.1.0
+ * Frame TV Art Card v0.2.0-beta.1
  */
 
 class FrameTVArtCard extends HTMLElement {
@@ -21,8 +21,48 @@ class FrameTVArtCard extends HTMLElement {
     this._refreshInfoMsg = null;
     this._refreshInProgress = false;
     this._refreshProgressMsg = '';
+    this._refreshProgressLog = [];
     this._docClickHandler = null;
     this._pollAppliedTimer = null;
+    this._staleClearTimer = null;
+    this._overrideToggleOn = false;
+    this._slideshowSeq = false;
+    this._slideshowUpdateMins = 0;
+    this._slideshowMode = 'auto';
+    this._slideshowAttrsUnsubscribe = null;
+    this._slideshowAvailable = [];
+    this._slideshowCurrentPaths = [];
+    this._slideshowOverridePaths = [];
+    this._slideshowSelected = new Set();
+    this._slideshowMaxUploads = 10;
+    this._slideshowUploading = false;
+    this._overridePanelOpen = false;
+    this._slideshowAvailUnsubscribe = null;
+    // Restore progress log if page was refreshed mid-sync (max 15 min TTL)
+    try {
+      const _raw = sessionStorage.getItem('ftvHaRefreshLog');
+      if (_raw && sessionStorage.getItem('ftvHaRefreshActive')) {
+        const _entry = JSON.parse(_raw);
+        const _age = Date.now() - (_entry.ts || 0);
+        if (_age < 15 * 60 * 1000) {
+          this._refreshProgressLog = _entry.log || [];
+          this._refreshInProgress = true;
+          // Safety valve: if no new ack messages arrive within 30s, assume the
+          // container already finished and clear the stale state.
+          this._staleClearTimer = setTimeout(() => {
+            if (this._refreshInProgress) {
+              this._refreshInProgress = false;
+              this._refreshProgressLog = [];
+              try { sessionStorage.removeItem('ftvHaRefreshLog'); sessionStorage.removeItem('ftvHaRefreshActive'); } catch(_) {}
+              this._lastStateHash = '';
+              if (this._hass) this._render();
+            }
+          }, 30000);
+        } else {
+          sessionStorage.removeItem('ftvHaRefreshLog'); sessionStorage.removeItem('ftvHaRefreshActive');
+        }
+      }
+    } catch(_) {}
   }
 
   setConfig(config) {
@@ -38,6 +78,8 @@ class FrameTVArtCard extends HTMLElement {
       refresh_cmd_topic: config.refresh_cmd_topic || 'frame_tv/cmd/collections/refresh',
       refresh_ack_topic: config.refresh_ack_topic || 'frame_tv/ack/collections/refresh',
       sync_ack_topic: config.sync_ack_topic || 'frame_tv/ack/settings/sync_collections',
+      slideshow_attr_topic: config.slideshow_attr_topic || 'frame_tv/slideshow/attributes',
+      slideshow_available_topic: config.slideshow_available_topic || 'frame_tv/slideshow/available',
       // Optional: allow overriding legacy helpers if desired
       add_button_entity: config.add_button_entity, // legacy keys no longer used
       remove_button_entity: config.remove_button_entity, // legacy keys no longer used
@@ -88,7 +130,7 @@ class FrameTVArtCard extends HTMLElement {
     const ackMessage = (this._refreshAck && this._refreshAck.message) || '';
     const ackReqId = (this._refreshAck && this._refreshAck.req_id) || '';
     const syncStatus = (this._syncAck && this._syncAck.status) || '';
-    return `${file}|${selected}|${options}|${ackStatus}|${ackMessage}|${ackReqId}|${syncStatus}|${this._refreshInProgress}`;
+    return `${file}|${selected}|${options}|${ackStatus}|${ackMessage}|${ackReqId}|${syncStatus}|${this._refreshInProgress}|${this._slideshowMode}|${this._overridePanelOpen}|${this._overrideToggleOn}|${this._slideshowSeq}|${this._slideshowUpdateMins}|${this._slideshowMaxUploads}|${this._slideshowUploading}`;
   }
 
   disconnectedCallback() {
@@ -101,9 +143,17 @@ class FrameTVArtCard extends HTMLElement {
     if (typeof this._syncAckUnsubscribe === 'function') {
       try { this._syncAckUnsubscribe(); } catch (_) {}
     }
+    if (typeof this._slideshowAttrsUnsubscribe === 'function') {
+      try { this._slideshowAttrsUnsubscribe(); } catch (_) {}
+    }
+    if (typeof this._slideshowAvailUnsubscribe === 'function') {
+      try { this._slideshowAvailUnsubscribe(); } catch (_) {}
+    }
     this._refreshAckUnsubscribe = null;
     this._refreshCmdUnsubscribe = null;
     this._syncAckUnsubscribe = null;
+    this._slideshowAttrsUnsubscribe = null;
+    this._slideshowAvailUnsubscribe = null;
     this._refreshSubscribing = false;
     // Clean up document-level listener and polling timer
     if (this._docClickHandler) {
@@ -119,7 +169,7 @@ class FrameTVArtCard extends HTMLElement {
   _ensureRefreshSubscriptions() {
     if (!this._hass || !this._hass.connection) return;
     if (this._refreshSubscribing) return;
-    if (this._refreshAckUnsubscribe && this._refreshCmdUnsubscribe && this._syncAckUnsubscribe) return;
+    if (this._refreshAckUnsubscribe && this._refreshCmdUnsubscribe && this._syncAckUnsubscribe && this._slideshowAttrsUnsubscribe && this._slideshowAvailUnsubscribe) return;
     this._refreshSubscribing = true;
 
     const ensureAck = this._refreshAckUnsubscribe
@@ -143,11 +193,27 @@ class FrameTVArtCard extends HTMLElement {
           { type: 'mqtt/subscribe', topic: this._config.sync_ack_topic }
         );
 
-    Promise.all([ensureAck, ensureCmd, ensureSyncAck])
-      .then(([ackUnsub, cmdUnsub, syncAckUnsub]) => {
+    const ensureSlideshowAttrs = this._slideshowAttrsUnsubscribe
+      ? Promise.resolve(this._slideshowAttrsUnsubscribe)
+      : this._hass.connection.subscribeMessage(
+          (msg) => this._handleSlideshowAttrsMessage(msg),
+          { type: 'mqtt/subscribe', topic: this._config.slideshow_attr_topic }
+        );
+
+    const ensureSlideshowAvail = this._slideshowAvailUnsubscribe
+      ? Promise.resolve(this._slideshowAvailUnsubscribe)
+      : this._hass.connection.subscribeMessage(
+          (msg) => this._handleSlideshowAvailableMessage(msg),
+          { type: 'mqtt/subscribe', topic: this._config.slideshow_available_topic }
+        );
+
+    Promise.all([ensureAck, ensureCmd, ensureSyncAck, ensureSlideshowAttrs, ensureSlideshowAvail])
+      .then(([ackUnsub, cmdUnsub, syncAckUnsub, slideshowAttrsUnsub, slideshowAvailUnsub]) => {
         if (!this._refreshAckUnsubscribe) this._refreshAckUnsubscribe = ackUnsub;
         if (!this._refreshCmdUnsubscribe) this._refreshCmdUnsubscribe = cmdUnsub;
         if (!this._syncAckUnsubscribe) this._syncAckUnsubscribe = syncAckUnsub;
+        if (!this._slideshowAttrsUnsubscribe) this._slideshowAttrsUnsubscribe = slideshowAttrsUnsub;
+        if (!this._slideshowAvailUnsubscribe) this._slideshowAvailUnsubscribe = slideshowAvailUnsub;
       })
       .catch(() => {})
       .finally(() => {
@@ -178,10 +244,14 @@ class FrameTVArtCard extends HTMLElement {
 
     const renderLog = () => {
       const infoEl = this.querySelector('.ftv-info');
-      if (infoEl) infoEl.innerHTML = this._refreshProgressLog.map(l => `<div>${l}</div>`).join('');
+      const logEl = this.querySelector('.ftv-refresh-log');
+      if (infoEl) infoEl.innerHTML = this._refreshProgressLog.length ? `<div>${this._refreshProgressLog[0]}</div>` : '';
+      if (logEl) logEl.innerHTML = this._refreshProgressLog.slice(1).map(l => `<div>${l}</div>`).join('');
+      try { sessionStorage.setItem('ftvHaRefreshLog', JSON.stringify({ log: this._refreshProgressLog, ts: Date.now() })); sessionStorage.setItem('ftvHaRefreshActive', '1'); } catch(_) {}
     };
 
     const appendProgress = (msg) => {
+      if (this._staleClearTimer) { clearTimeout(this._staleClearTimer); this._staleClearTimer = null; }
       if (!this._refreshInProgress) {
         // First message: lock the display, seed the log, trigger full re-render with standby bg
         this._refreshProgressLog = ['Please stand by as artwork is loaded...'];
@@ -214,6 +284,7 @@ class FrameTVArtCard extends HTMLElement {
           this._refreshInProgress = false;
           this._refreshProgressMsg = '';
           this._refreshProgressLog = [];
+          try { sessionStorage.removeItem('ftvHaRefreshLog'); sessionStorage.removeItem('ftvHaRefreshActive'); } catch(_) {}
           this._lastStateHash = '';
           this._render();
         }
@@ -267,6 +338,37 @@ class FrameTVArtCard extends HTMLElement {
       updated: Date.now(),
     };
     this._syncRefreshAckStatus();
+  }
+
+  _handleSlideshowAttrsMessage(message) {
+    const payload = this._parseJsonPayload(message);
+    const mode = String((payload && payload.mode) || 'auto').toLowerCase();
+    const prevMode = this._slideshowMode;
+    this._slideshowCurrentPaths = (payload && Array.isArray(payload.current_paths)) ? payload.current_paths : [];
+    this._slideshowOverridePaths = (payload && Array.isArray(payload.override_paths)) ? payload.override_paths : [];
+    this._slideshowMaxUploads = parseInt((payload && payload.max_uploads) || 10, 10);
+    this._slideshowUploading = !!(payload && payload.uploading);
+    this._slideshowSeq = !!(payload && payload.sequential);
+    this._slideshowUpdateMins = parseInt((payload && payload.update_minutes) || 0, 10);
+    this._slideshowMode = mode;
+    if (mode !== prevMode) {
+      // Server confirmed a mode change — always sync toggle to match
+      this._overrideToggleOn = (mode === 'override');
+      // If override became active, seed selection from override paths
+      if (mode === 'override' && this._slideshowOverridePaths.length) {
+        this._slideshowSelected = new Set(this._slideshowOverridePaths);
+      }
+      this._lastStateHash = '';
+      if (this._hass) this._render();
+    } else if (this._overridePanelOpen) {
+      this._renderOverrideGrid();
+    }
+  }
+
+  _handleSlideshowAvailableMessage(message) {
+    const payload = this._parseJsonPayload(message);
+    this._slideshowAvailable = (payload && Array.isArray(payload.images)) ? payload.images : [];
+    if (this._overridePanelOpen) this._renderOverrideGrid();
   }
 
   _handleSyncAckMessage(message) {
@@ -655,7 +757,9 @@ class FrameTVArtCard extends HTMLElement {
     if (this._refreshInProgress) {
       setTimeout(() => {
         const infoEl = this.querySelector('.ftv-info');
-        if (infoEl) infoEl.innerHTML = this._refreshProgressLog.map(l => `<div>${l}</div>`).join('');
+        const logEl = this.querySelector('.ftv-refresh-log');
+        if (infoEl) infoEl.innerHTML = this._refreshProgressLog.length ? `<div>${this._refreshProgressLog[0]}</div>` : '';
+        if (logEl) logEl.innerHTML = this._refreshProgressLog.slice(1).map(l => `<div>${l}</div>`).join('');
       }, 0);
     } else {
       setTimeout(() => {
@@ -671,6 +775,7 @@ class FrameTVArtCard extends HTMLElement {
           }
           .ftv-card {
             padding: 12px;
+            position: relative;
             border-radius: var(--ha-card-border-radius, 12px);
             ${hasArtwork ? `background: linear-gradient(rgba(0,0,0,0.1), rgba(0,0,0,0.1)), url("${bgUrl}"); background-size: cover; background-position: center;` : ''}
           }
@@ -844,14 +949,22 @@ class FrameTVArtCard extends HTMLElement {
             align-items: center;
             justify-content: center;
           }
+          .ftv-progress-wrap {
+            ${hasArtwork ? 'background: rgba(0,0,0,0.5); border-radius: 8px; overflow: hidden;' : ''}
+          }
           .ftv-info {
             display: block;
             width: 100%;
             box-sizing: border-box;
             padding: 12px;
-            border-radius: 8px;
-            ${hasArtwork ? 'background: rgba(0,0,0,0.5); color: white;' : ''}
+            ${hasArtwork ? 'color: white;' : ''}
           }
+          .ftv-refresh-log {
+            font-size: 0.85em;
+            line-height: 1.6;
+            ${hasArtwork ? 'padding: 0 12px 10px; color: rgba(255,255,255,0.75);' : 'color: var(--secondary-text-color);'}
+          }
+          .ftv-refresh-log:empty { display: none; }
           .ftv-status {
             margin-top: 0;
             min-height: 0;
@@ -886,6 +999,125 @@ class FrameTVArtCard extends HTMLElement {
             opacity: 0.5;
             cursor: default;
           }
+          .ftv-override-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 3px 9px;
+            border-radius: 12px;
+            font-size: 0.75em;
+            font-weight: 600;
+            background: rgba(255, 180, 0, 0.22);
+            color: #ffb400;
+            border: 1px solid rgba(255, 180, 0, 0.45);
+            cursor: pointer;
+            white-space: nowrap;
+            user-select: none;
+          }
+          .ftv-override-badge:hover {
+            background: rgba(255, 180, 0, 0.35);
+          }
+          .ftv-override-badge .ftv-badge-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: #ffb400;
+            flex-shrink: 0;
+          }
+          .ftv-grid-btn {
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            color: inherit;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 32px; height: 32px;
+            border-radius: 6px;
+          }
+          .ftv-grid-btn:hover { background: rgba(255,255,255,0.12); }
+          .ftv-grid-btn.active { color: var(--primary-color, #03a9f4); }
+          .ftv-override-popup {
+            display: none;
+            position: absolute;
+            left: 0; right: 0; top: 58px;
+            background: rgba(18,18,18,0.97);
+            border: 1px solid #555;
+            border-radius: 0 0 10px 10px;
+            z-index: 10001;
+            max-height: 65vh;
+            overflow-y: auto;
+            color: #f0f0f0;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.55);
+          }
+          .ftv-override-popup.open { display: block; }
+          .ftv-op-topbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 14px 6px;
+            border-bottom: 1px solid #333;
+          }
+          .ftv-op-title { font-weight: 600; font-size: 0.95em; }
+          .ftv-op-counter { font-size: 0.8em; color: rgba(255,255,255,0.55); }
+          .ftv-op-warn { padding: 6px 14px 0; font-size: 0.8em; color: #ffb400; }
+          .ftv-op-actions { display: flex; gap: 8px; padding: 8px 14px; }
+          .ftv-op-btn { padding: 6px 14px; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85em; font-weight: 600; }
+          .ftv-op-btn.primary { background: #2f7fbf; color: #fff; }
+          .ftv-op-btn.danger { background: #c0392b; color: #fff; }
+          .ftv-op-btn:disabled { opacity: 0.4; cursor: default; }
+          .ftv-op-grid {
+            padding: 4px 10px 12px;
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+            gap: 6px;
+          }
+          .ftv-op-section {
+            grid-column: 1 / -1;
+            font-size: 0.72em;
+            font-weight: 700;
+            color: rgba(255,255,255,0.38);
+            padding: 6px 2px 2px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+          }
+          .ftv-op-thumb {
+            position: relative;
+            border-radius: 5px;
+            border: 2px solid transparent;
+            overflow: hidden;
+            cursor: pointer;
+            background: #222;
+          }
+          .ftv-op-thumb img { width: 100%; aspect-ratio: 16/9; object-fit: cover; display: block; }
+          .ftv-op-thumb.selected { border-color: #2f7fbf; }
+          .ftv-op-thumb.disabled { opacity: 0.38; cursor: not-allowed; }
+          .ftv-op-check {
+            position: absolute; top: 3px; right: 3px;
+            width: 16px; height: 16px;
+            border-radius: 3px;
+            border: 1.5px solid rgba(255,255,255,0.55);
+            background: transparent;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 10px; color: #fff;
+          }
+          .ftv-op-thumb.selected .ftv-op-check { background: #2f7fbf; border-color: #2f7fbf; }
+          .ftv-op-hint { padding: 16px 14px; font-size: 0.85em; color: rgba(255,255,255,0.4); text-align: center; }
+          .ftv-op-switch { position: relative; display: inline-block; width: 44px; height: 24px; flex-shrink: 0; }
+          .ftv-op-switch input { opacity: 0; width: 0; height: 0; }
+          .ftv-op-slider { position: absolute; cursor: pointer; inset: 0; background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.2); border-radius: 24px; transition: background 0.2s; }
+          .ftv-op-slider::before { content: ""; position: absolute; width: 18px; height: 18px; left: 2px; top: 2px; background: rgba(255,255,255,0.5); border-radius: 50%; transition: transform 0.2s, background 0.2s; }
+          .ftv-op-switch input:checked + .ftv-op-slider { background: #2f7fbf; border-color: #2f7fbf; }
+          .ftv-op-switch input:checked + .ftv-op-slider::before { transform: translateX(20px); background: #fff; }
+          .ftv-op-switch input:disabled + .ftv-op-slider { opacity: 0.4; cursor: not-allowed; }
+          .ftv-op-settings { padding: 10px 14px 8px; border-bottom: 1px solid #333; display: flex; flex-direction: column; gap: 8px; }
+          .ftv-op-settings-row { display: flex; gap: 6px; align-items: center; }
+          .ftv-op-input { flex: 1; padding: 7px 8px; background: #2a2a2a; color: #f0f0f0; border: 1px solid #555; border-radius: 6px; font-size: 0.85em; min-width: 0; }
+          .ftv-op-select { flex: 1.2; padding: 7px 8px; background: #2a2a2a; color: #f0f0f0; border: 1px solid #555; border-radius: 6px; font-size: 0.85em; }
+          .ftv-op-btn.apply { background: #4a6fa5; color: #fff; }
+          .ftv-op-toggle-row { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid #333; }
+          .ftv-op-toggle-label { font-size: 0.9em; color: #f0f0f0; }
+          .ftv-op-hint-text { font-size: 0.77em; color: rgba(255,255,255,0.38); padding: 0 14px 4px; }
         </style>
         <div class="ftv-card">
           <div class="ftv-header">
@@ -894,9 +1126,46 @@ class FrameTVArtCard extends HTMLElement {
             </div>
             <span>${this._config.title}</span>
             <span class="spacer"></span>
+            ${this._slideshowMode === 'override' ? `<button class="ftv-override-badge" id="ftv-override-badge" title="Override active — click to clear"><span class="ftv-badge-dot"></span>Override</button>` : ''}
+            <button class="ftv-grid-btn${this._overridePanelOpen ? ' active' : ''}" id="ftv-grid-btn" title="Slideshow override">
+              <ha-icon icon="mdi:view-grid"></ha-icon>
+            </button>
             <button class="ftv-gear" id="ftv-gear" title="Settings">
               <ha-icon icon="mdi:cog"></ha-icon>
             </button>
+          </div>
+          <div class="ftv-override-popup${this._overridePanelOpen ? ' open' : ''}" id="ftv-override-popup">
+            <div class="ftv-op-settings">
+              <div class="ftv-op-settings-row">
+                <select class="ftv-op-select" id="ftv-op-type">
+                  <option value="random"${!this._slideshowSeq ? ' selected' : ''}>Random</option>
+                  <option value="sequential"${this._slideshowSeq ? ' selected' : ''}>Sequential</option>
+                </select>
+                <input class="ftv-op-input" id="ftv-op-interval" type="number" min="0" placeholder="Interval (min)" value="${this._slideshowUpdateMins}" />
+                <input class="ftv-op-input" id="ftv-op-max" type="number" min="1" placeholder="Max uploads" value="${this._slideshowMaxUploads}" />
+                <button class="ftv-op-btn apply" id="ftv-op-settings-apply" disabled>Apply</button>
+              </div>
+              <div class="ftv-op-hint-text">Interval: minutes between changes (0=off). Max: artwork slots on TV.</div>
+            </div>
+            <div class="ftv-op-toggle-row">
+              <label class="ftv-op-switch">
+                <input type="checkbox" id="ftv-op-override-toggle" ${this._overrideToggleOn ? 'checked' : ''} ${this._slideshowUploading ? 'disabled' : ''}>
+                <span class="ftv-op-slider"></span>
+              </label>
+              <span class="ftv-op-toggle-label">Manual override</span>
+              ${this._slideshowMode === 'override' ? '<span style="font-size:0.75em;color:#ffb400;margin-left:auto;">&#x25CF; Active</span>' : ''}
+            </div>
+            ${this._overrideToggleOn ? `
+            <div class="ftv-op-topbar">
+              <span class="ftv-op-counter" id="ftv-op-counter">0 / ${this._slideshowMaxUploads} selected</span>
+              <div style="display:flex;gap:6px;">
+                <button class="ftv-op-btn primary" id="ftv-op-apply" disabled>Apply Override</button>
+                <button class="ftv-op-btn danger" id="ftv-op-clear" style="${this._slideshowMode !== 'override' ? 'display:none' : ''}">Clear Override</button>
+              </div>
+            </div>
+            <div id="ftv-op-warn" class="ftv-op-warn" style="${this._slideshowUploading ? '' : 'display:none'}">&#9888; Uploading — grid locked</div>
+            <div class="ftv-op-grid" id="ftv-op-grid"></div>
+            ` : ''}
           </div>
           <div class="ftv-controls">
             <div class="ftv-row">
@@ -928,22 +1197,33 @@ class FrameTVArtCard extends HTMLElement {
               </div>
               <div class="ftv-status" id="ftv-status">${this._statusMessage || ''}</div>
           </div>
-          <div class="ftv-info">${artworkText}</div>
+          <div class="ftv-progress-wrap">
+            <div class="ftv-info">${artworkText}</div>
+            <div class="ftv-refresh-log"></div>
+          </div>
           <div class="ftv-settings" id="ftv-settings">
             <div class="ftv-field">
               <div class="ftv-label">Frame TV IP address</div>
               <input class="ftv-input" id="ftv-tv-ip" type="text" placeholder="e.g. 10.83.21.57" />
             </div>
             <div class="ftv-field">
-              <div class="ftv-label">Max uploads</div>
-              <input class="ftv-input" id="ftv-max-uploads" type="number" min="1" placeholder="e.g. 30" />
+              <div class="ftv-label">MQTT broker host</div>
+              <input class="ftv-input" id="ftv-mqtt-host" type="text" placeholder="e.g. mosquitto" />
             </div>
             <div class="ftv-field">
-              <div class="ftv-label">Interval minutes</div>
-              <input class="ftv-input" id="ftv-interval-mins" type="number" min="0" placeholder="e.g. 30" />
+              <div class="ftv-label">MQTT port</div>
+              <input class="ftv-input" id="ftv-mqtt-port" type="number" placeholder="e.g. 1883" />
+            </div>
+            <div class="ftv-field">
+              <div class="ftv-label">MQTT username</div>
+              <input class="ftv-input" id="ftv-mqtt-user" type="text" placeholder="(optional)" />
+            </div>
+            <div class="ftv-field">
+              <div class="ftv-label">MQTT password</div>
+              <input class="ftv-input" id="ftv-mqtt-pass" type="password" placeholder="(optional)" />
             </div>
             <div class="actions">
-              <button class="ftv-btn primary" id="ftv-apply-env" disabled>Apply & Refresh</button>
+              <button class="ftv-btn primary" id="ftv-apply-env" disabled>Apply &amp; Restart</button>
               <button class="ftv-btn ghost" id="ftv-restart-env">Restart Uploader</button>
               <button class="ftv-btn ghost" id="ftv-sync-collections">Update &amp; Refresh</button>
             </div>
@@ -955,9 +1235,11 @@ class FrameTVArtCard extends HTMLElement {
     // Settings panel logic
     const gear = this.querySelector('#ftv-gear');
     const panel = this.querySelector('#ftv-settings');
-    const inMax = this.querySelector('#ftv-max-uploads');
-    const inMins = this.querySelector('#ftv-interval-mins');
     const inIp = this.querySelector('#ftv-tv-ip');
+    const inMqttHost = this.querySelector('#ftv-mqtt-host');
+    const inMqttPort = this.querySelector('#ftv-mqtt-port');
+    const inMqttUser = this.querySelector('#ftv-mqtt-user');
+    const inMqttPass = this.querySelector('#ftv-mqtt-pass');
     const btnApplyEnv = this.querySelector('#ftv-apply-env');
     const btnRestartEnv = this.querySelector('#ftv-restart-env');
     const btnSyncCollections = this.querySelector('#ftv-sync-collections');
@@ -982,9 +1264,11 @@ class FrameTVArtCard extends HTMLElement {
     let envBaseline = {};
     function envDirty() {
       const changed = (
-        String(inMax.value||'') !== String(envBaseline.SAMSUNG_TV_ART_MAX_UPLOADS||'') ||
-        String(inMins.value||'') !== String(envBaseline.SAMSUNG_TV_ART_UPDATE_MINUTES||'') ||
-        String(inIp.value||'') !== String(envBaseline.SAMSUNG_TV_ART_TV_IP||'')
+        String(inIp?.value||'') !== String(envBaseline.SAMSUNG_TV_ART_TV_IP||'') ||
+        String(inMqttHost?.value||'') !== String(envBaseline.SAMSUNG_TV_ART_MQTT_HOST||'') ||
+        String(inMqttPort?.value||'') !== String(envBaseline.SAMSUNG_TV_ART_MQTT_PORT||'') ||
+        String(inMqttUser?.value||'') !== String(envBaseline.SAMSUNG_TV_ART_MQTT_USERNAME||'') ||
+        (inMqttPass?.value||'').length > 0
       );
       if (btnApplyEnv) { btnApplyEnv.disabled = !changed; }
     }
@@ -994,16 +1278,158 @@ class FrameTVArtCard extends HTMLElement {
         const st = this._hass.states[settingsEntity];
         const attrs = (st && st.attributes) || {};
         envBaseline = {
-          SAMSUNG_TV_ART_MAX_UPLOADS: attrs.SAMSUNG_TV_ART_MAX_UPLOADS || '',
-          SAMSUNG_TV_ART_UPDATE_MINUTES: attrs.SAMSUNG_TV_ART_UPDATE_MINUTES || '',
           SAMSUNG_TV_ART_TV_IP: attrs.SAMSUNG_TV_ART_TV_IP || '',
+          SAMSUNG_TV_ART_MQTT_HOST: attrs.SAMSUNG_TV_ART_MQTT_HOST || '',
+          SAMSUNG_TV_ART_MQTT_PORT: attrs.SAMSUNG_TV_ART_MQTT_PORT || '',
+          SAMSUNG_TV_ART_MQTT_USERNAME: attrs.SAMSUNG_TV_ART_MQTT_USERNAME || '',
         };
-        if (inMax) inMax.value = envBaseline.SAMSUNG_TV_ART_MAX_UPLOADS;
-        if (inMins) inMins.value = envBaseline.SAMSUNG_TV_ART_UPDATE_MINUTES;
         if (inIp) inIp.value = envBaseline.SAMSUNG_TV_ART_TV_IP;
+        if (inMqttHost) inMqttHost.value = envBaseline.SAMSUNG_TV_ART_MQTT_HOST;
+        if (inMqttPort) inMqttPort.value = envBaseline.SAMSUNG_TV_ART_MQTT_PORT;
+        if (inMqttUser) inMqttUser.value = envBaseline.SAMSUNG_TV_ART_MQTT_USERNAME;
         envDirty();
       } catch (_) {}
     };
+    // Grid (override) button — toggle the override popup
+    // The amber Override badge also opens the panel on click
+    const gridBtn = this.querySelector('#ftv-grid-btn');
+    const overrideBadge = this.querySelector('#ftv-override-badge');
+    const openOverridePanel = () => {
+      if (!this._overridePanelOpen) {
+        this._overridePanelOpen = true;
+        if (this._slideshowSelected.size === 0) {
+          this._slideshowSelected = new Set(
+            this._slideshowOverridePaths.length ? this._slideshowOverridePaths : this._slideshowCurrentPaths
+          );
+        }
+        // Direct DOM toggle — avoids full re-render and background flash
+        const _pop = this.querySelector('#ftv-override-popup');
+        const _gbtn = this.querySelector('#ftv-grid-btn');
+        if (_pop) _pop.classList.add('open');
+        if (_gbtn) _gbtn.classList.add('active');
+        this._renderOverrideGrid();
+        this._lastStateHash = this._getStateHash();
+      }
+    };
+    if (overrideBadge) {
+      overrideBadge.addEventListener('click', (e) => { e.stopPropagation(); openOverridePanel(); });
+    }
+    if (gridBtn) {
+      gridBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this._overridePanelOpen = !this._overridePanelOpen;
+        if (this._overridePanelOpen && this._slideshowSelected.size === 0) {
+          this._slideshowSelected = new Set(
+            this._slideshowOverridePaths.length ? this._slideshowOverridePaths : this._slideshowCurrentPaths
+          );
+        }
+        // Direct DOM toggle — avoids full re-render and background flash
+        const _pop = this.querySelector('#ftv-override-popup');
+        if (_pop) _pop.classList.toggle('open', this._overridePanelOpen);
+        gridBtn.classList.toggle('active', this._overridePanelOpen);
+        if (this._overridePanelOpen) this._renderOverrideGrid();
+        this._lastStateHash = this._getStateHash();
+      });
+    }
+    // Override popup: Apply
+    const opApply = this.querySelector('#ftv-op-apply');
+    if (opApply) {
+      opApply.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!this._hass || !this._slideshowSelected.size) return;
+        const paths = Array.from(this._slideshowSelected);
+        this._hass.callService('mqtt', 'publish', {
+          topic: 'frame_tv/cmd/slideshow/override/set',
+          payload: JSON.stringify({ paths, req_id: Date.now() }),
+          qos: 1, retain: false,
+        });
+      });
+    }
+    // Override popup: Clear
+    const opClear = this.querySelector('#ftv-op-clear');
+    if (opClear) {
+      opClear.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!this._hass) return;
+        this._hass.callService('mqtt', 'publish', {
+          topic: 'frame_tv/cmd/slideshow/override/clear',
+          payload: JSON.stringify({ req_id: Date.now() }),
+          qos: 1, retain: false,
+        });
+        this._slideshowSelected = new Set();
+        this._renderOverrideGrid();
+      });
+    }
+    // Slideshow settings (inside the popup)
+    const opType = this.querySelector('#ftv-op-type');
+    const opInterval = this.querySelector('#ftv-op-interval');
+    const opMax = this.querySelector('#ftv-op-max');
+    const opSettingsApply = this.querySelector('#ftv-op-settings-apply');
+    const slSettingsDirty = () => {
+      if (!opSettingsApply) return;
+      const changed = (opType && opType.value !== (this._slideshowSeq ? 'sequential' : 'random')) ||
+        parseInt(opInterval?.value || 0, 10) !== this._slideshowUpdateMins ||
+        parseInt(opMax?.value || 10, 10) !== this._slideshowMaxUploads;
+      opSettingsApply.disabled = !changed;
+    };
+    if (opType) opType.addEventListener('change', slSettingsDirty);
+    if (opInterval) opInterval.addEventListener('input', slSettingsDirty);
+    if (opMax) opMax.addEventListener('input', slSettingsDirty);
+    if (opSettingsApply) opSettingsApply.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (!this._hass) return;
+      const sequential = opType && opType.value === 'sequential';
+      const update_minutes = parseInt(opInterval?.value || 0, 10);
+      const max_uploads = parseInt(opMax?.value || 10, 10);
+      this._hass.callService('mqtt', 'publish', { topic: 'frame_tv/cmd/slideshow/settings/set', payload: JSON.stringify({ sequential, update_minutes, req_id: Date.now() }), qos: 1, retain: false });
+      this._hass.callService('mqtt', 'publish', { topic: 'frame_tv/cmd/settings/set', payload: JSON.stringify({ SAMSUNG_TV_ART_MAX_UPLOADS: String(max_uploads), SAMSUNG_TV_ART_UPDATE_MINUTES: String(update_minutes) }), qos: 1, retain: false });
+      if (opSettingsApply) opSettingsApply.disabled = true;
+    });
+    // Override toggle — show/hide the grid section
+    const opToggle = this.querySelector('#ftv-op-override-toggle');
+    if (opToggle) {
+      opToggle.addEventListener('change', (e) => {
+        e.stopPropagation();
+        const turningOn = opToggle.checked;
+        this._overrideToggleOn = turningOn;
+        if (turningOn) {
+          if (this._slideshowSelected.size === 0) {
+            this._slideshowSelected = new Set(
+              this._slideshowOverridePaths.length ? this._slideshowOverridePaths : this._slideshowCurrentPaths
+            );
+          }
+          // Request a fresh available list so the grid populates
+          if (this._hass) {
+            this._hass.callService('mqtt', 'publish', {
+              topic: 'frame_tv/cmd/slideshow/available/request',
+              payload: JSON.stringify({ req_id: Date.now() }),
+              qos: 1, retain: false,
+            }).catch(() => {});
+          }
+        } else {
+          if (this._hass) {
+            const _reqId = Date.now();
+            this._hass.callService('mqtt', 'publish', {
+              topic: 'frame_tv/cmd/slideshow/override/clear',
+              payload: JSON.stringify({ req_id: _reqId }),
+              qos: 1, retain: false,
+            }).then(() => {
+              setStatus('Override clear sent…', 4000);
+            }).catch((err) => {
+              setStatus('Failed to send clear command — check MQTT integration.', 8000);
+              // Revert toggle state since the command failed
+              this._overrideToggleOn = true;
+              this._lastStateHash = '';
+              this._render();
+            });
+          }
+        }
+        this._lastStateHash = '';
+        this._render();
+      });
+    }
+    // Populate the grid immediately if panel is open
+    if (this._overridePanelOpen) this._renderOverrideGrid();
     if (gear && panel) {
       gear.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -1019,29 +1445,45 @@ class FrameTVArtCard extends HTMLElement {
         const path = (typeof e.composedPath === 'function') ? e.composedPath() : [];
         const inside = (panel && path.includes(panel)) || (gear && path.includes(gear));
         if (!inside) panel.classList.remove('open');
+        // Also close override popup on outside click
+        const overridePopup = this.querySelector('#ftv-override-popup');
+        const gridBtnEl = this.querySelector('#ftv-grid-btn');
+        const badgeEl = this.querySelector('#ftv-override-badge');
+        const insideOverride = (overridePopup && path.includes(overridePopup)) || (gridBtnEl && path.includes(gridBtnEl)) || (badgeEl && path.includes(badgeEl));
+        if (!insideOverride && this._overridePanelOpen) {
+          this._overridePanelOpen = false;
+          // Direct DOM toggle — avoids full re-render and background flash
+          if (overridePopup) overridePopup.classList.remove('open');
+          if (gridBtnEl) gridBtnEl.classList.remove('active');
+          this._lastStateHash = this._getStateHash();
+        }
       };
       document.addEventListener('click', this._docClickHandler, { capture: true });
     }
-    if (inMax) inMax.addEventListener('input', envDirty);
-    if (inMins) inMins.addEventListener('input', envDirty);
     if (inIp) inIp.addEventListener('input', envDirty);
+    if (inMqttHost) inMqttHost.addEventListener('input', envDirty);
+    if (inMqttPort) inMqttPort.addEventListener('input', envDirty);
+    if (inMqttUser) inMqttUser.addEventListener('input', envDirty);
+    if (inMqttPass) inMqttPass.addEventListener('input', envDirty);
     if (btnApplyEnv) btnApplyEnv.addEventListener('click', async (e) => {
       e.stopPropagation();
       try {
         const payload = {
-          SAMSUNG_TV_ART_MAX_UPLOADS: String(inMax.value||'').trim(),
-          SAMSUNG_TV_ART_UPDATE_MINUTES: String(inMins.value||'').trim(),
-          SAMSUNG_TV_ART_TV_IP: String(inIp.value||'').trim(),
+          SAMSUNG_TV_ART_TV_IP: String(inIp?.value||'').trim(),
+          SAMSUNG_TV_ART_MQTT_HOST: String(inMqttHost?.value||'').trim(),
+          SAMSUNG_TV_ART_MQTT_PORT: String(inMqttPort?.value||'').trim(),
+          SAMSUNG_TV_ART_MQTT_USERNAME: String(inMqttUser?.value||'').trim(),
         };
-        // Publish settings via MQTT
+        if (inMqttPass?.value) payload.SAMSUNG_TV_ART_MQTT_PASSWORD = inMqttPass.value;
+        // Publish settings via MQTT (MQTT/IP changes require restart)
         if (this._hass) {
           this._hass.callService('mqtt', 'publish', { topic: 'frame_tv/cmd/settings/set', payload: JSON.stringify(payload), qos: 1, retain: false });
-          this._hass.callService('mqtt', 'publish', { topic: 'frame_tv/cmd/settings/refresh', payload: JSON.stringify({ req_id: Date.now() }), qos: 1, retain: false });
         }
         btnApplyEnv.textContent = 'Applying…';
         btnApplyEnv.disabled = true;
-        if (envMsg) envMsg.textContent = 'Applying settings and requesting refresh…';
-        setTimeout(() => { btnApplyEnv.textContent = 'Apply & Refresh'; envBaseline = payload; envDirty(); if (envMsg) envMsg.textContent=''; }, 4000);
+        if (envMsg) envMsg.textContent = 'Settings sent — restart required to apply MQTT/IP changes.';
+        const _baselineForReset = { ...payload }; delete _baselineForReset.SAMSUNG_TV_ART_MQTT_PASSWORD;
+        setTimeout(() => { btnApplyEnv.textContent = 'Apply & Restart'; envBaseline = _baselineForReset; if (inMqttPass) inMqttPass.value = ''; envDirty(); if (envMsg) envMsg.textContent=''; }, 5000);
       } catch (_) {}
     });
 
@@ -1109,9 +1551,11 @@ class FrameTVArtCard extends HTMLElement {
         const st = this._hass && settingsEntity ? this._hass.states[settingsEntity] : null;
         const attrs = (st && st.attributes) || {};
         const ok = (
-          String(attrs.SAMSUNG_TV_ART_MAX_UPLOADS||'') === String(inMax.value||'') &&
-          String(attrs.SAMSUNG_TV_ART_UPDATE_MINUTES||'') === String(inMins.value||'') &&
-          String(attrs.SAMSUNG_TV_ART_TV_IP||'') === String(inIp.value||'')
+          String(attrs.SAMSUNG_TV_ART_TV_IP||'') === String(inIp?.value||'') &&
+          String(attrs.SAMSUNG_TV_ART_MQTT_HOST||'') === String(inMqttHost?.value||'') &&
+          String(attrs.SAMSUNG_TV_ART_MQTT_PORT||'') === String(inMqttPort?.value||'') &&
+          String(attrs.SAMSUNG_TV_ART_MQTT_USERNAME||'') === String(inMqttUser?.value||'') &&
+          !(inMqttPass?.value||'')
         );
         if (ok && envMsg) { envMsg.textContent = 'Settings applied.'; setTimeout(() => { if (envMsg.textContent==='Settings applied.') envMsg.textContent=''; }, 6000); }
       } catch (_) {}
@@ -1203,7 +1647,75 @@ class FrameTVArtCard extends HTMLElement {
 
       }
 
-      _trySetBackground(el, urls) {
+  _renderOverrideGrid() {
+    const grid = this.querySelector('#ftv-op-grid');
+    if (!grid) return;
+    this._updateOverrideCounter();
+    if (!this._slideshowAvailable.length) {
+      grid.innerHTML = '<div class="ftv-op-hint">No images available. Make sure collections are selected above.</div>';
+      return;
+    }
+    const atMax = this._slideshowSelected.size >= this._slideshowMaxUploads;
+    const locked = this._slideshowUploading;
+    const basePath = this._getBaseImagePath();
+    // Group unselected by artist/folder
+    const groups = {};
+    for (const img of this._slideshowAvailable) {
+      if (this._slideshowSelected.has(img.path)) continue;
+      const key = (img.artist && img.artist.trim()) ? img.artist.trim() : (img.folder || 'Unknown');
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(img);
+    }
+    let html = '';
+    // Selected section first
+    const selectedImgs = this._slideshowAvailable.filter(img => this._slideshowSelected.has(img.path));
+    if (selectedImgs.length) {
+      html += `<div class="ftv-op-section">Selected (${selectedImgs.length})</div>`;
+      for (const img of selectedImgs) {
+        const url = `${basePath}/${encodeURIComponent(img.folder)}/${encodeURIComponent(img.file)}`;
+        html += `<div class="ftv-op-thumb selected${locked ? ' disabled' : ''}" data-path="${this._escapeHtml(img.path)}"><img src="${url}" loading="lazy" alt="" onerror="this.style.display='none'"><div class="ftv-op-check">&#10003;</div></div>`;
+      }
+    }
+    // Remaining grouped by artist
+    for (const [groupName, images] of Object.entries(groups).sort(([a], [b]) => a.localeCompare(b))) {
+      html += `<div class="ftv-op-section">${this._escapeHtml(groupName)}</div>`;
+      for (const img of images) {
+        const url = `${basePath}/${encodeURIComponent(img.folder)}/${encodeURIComponent(img.file)}`;
+        const isDisabled = atMax || locked;
+        html += `<div class="ftv-op-thumb${isDisabled ? ' disabled' : ''}" data-path="${this._escapeHtml(img.path)}"><img src="${url}" loading="lazy" alt="" onerror="this.style.display='none'"><div class="ftv-op-check"></div></div>`;
+      }
+    }
+    grid.innerHTML = html;
+    if (!locked) {
+      grid.querySelectorAll('.ftv-op-thumb').forEach(el => {
+        el.addEventListener('click', () => {
+          if (el.classList.contains('disabled')) return;
+          const path = el.dataset.path;
+          if (this._slideshowSelected.has(path)) {
+            this._slideshowSelected.delete(path);
+          } else {
+            if (this._slideshowSelected.size >= this._slideshowMaxUploads) return;
+            this._slideshowSelected.add(path);
+          }
+          this._renderOverrideGrid();
+        });
+      });
+    }
+  }
+
+  _updateOverrideCounter() {
+    const count = this._slideshowSelected.size;
+    const counterEl = this.querySelector('#ftv-op-counter');
+    if (counterEl) counterEl.textContent = `${count} / ${this._slideshowMaxUploads} selected`;
+    const applyBtn = this.querySelector('#ftv-op-apply');
+    if (applyBtn) applyBtn.disabled = count === 0 || this._slideshowUploading;
+    const clearBtn = this.querySelector('#ftv-op-clear');
+    if (clearBtn) clearBtn.style.display = this._slideshowMode === 'override' ? '' : 'none';
+    const warnEl = this.querySelector('#ftv-op-warn');
+    if (warnEl) warnEl.style.display = this._slideshowUploading ? '' : 'none';
+  }
+
+  _trySetBackground(el, urls) {
       if (!urls || urls.length === 0) return;
       const tryNext = (i) => {
         if (i >= urls.length) return;
@@ -1221,7 +1733,7 @@ class FrameTVArtCard extends HTMLElement {
     }
   }
 
-console.info('%c FRAME-TV-ART-CARD %c v0.1.0-beta.1 ', 'color: white; background: #03a9f4; font-weight: bold;', '');
+console.info('%c FRAME-TV-ART-CARD %c v0.2.0-beta.1 ', 'color: white; background: #03a9f4; font-weight: bold;', '');
 
 // Register custom element so Lovelace can use <frame-tv-art-card>
 try {
