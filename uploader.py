@@ -282,6 +282,15 @@ class monitor_and_display:
         self.sync = sync
         self.matte = matte
         self.sequential = sequential
+        # Allow SAMSUNG_TV_ART_SEQUENTIAL env var to override CLI arg so it persists across restarts
+        _env_seq = os.environ.get('SAMSUNG_TV_ART_SEQUENTIAL', '').lower()
+        if _env_seq in ('1', 'true', 'yes'):
+            self.sequential = True
+        elif _env_seq in ('0', 'false', 'no'):
+            self.sequential = False
+        # Slideshow override (persisted to /data/slideshow_override.json)
+        self.slideshow_override = None  # None = auto; list[str] of path_rel = manual override
+        self.slideshow_override_path = '/data/slideshow_override.json'
         self.on = on
         self.exclude = exclude
         self.exclude_content_ids = exclude_content_ids
@@ -323,6 +332,10 @@ class monitor_and_display:
         # Settings topics (MQTT-only settings management)
         self.mqtt_settings_state_topic = os.environ.get('SAMSUNG_TV_ART_MQTT_SETTINGS_STATE', 'frame_tv/settings/state')
         self.mqtt_settings_attr_topic = os.environ.get('SAMSUNG_TV_ART_MQTT_SETTINGS_ATTR', 'frame_tv/settings/attributes')
+        # Slideshow state/available topics
+        self.mqtt_slideshow_state_topic = os.environ.get('SAMSUNG_TV_ART_MQTT_SLIDESHOW_STATE', 'frame_tv/slideshow/state')
+        self.mqtt_slideshow_attr_topic = os.environ.get('SAMSUNG_TV_ART_MQTT_SLIDESHOW_ATTR', 'frame_tv/slideshow/attributes')
+        self.mqtt_slideshow_available_topic = os.environ.get('SAMSUNG_TV_ART_MQTT_SLIDESHOW_AVAILABLE', 'frame_tv/slideshow/available')
         self.ha_rest_enabled = False  # REST disabled in MQTT-only build
         self._mqtt = None
         self._mqtt_config_published = False
@@ -354,6 +367,7 @@ class monitor_and_display:
             self.state_refresh_seconds = 300
         self._last_state_publish = 0
         self._refresh_in_progress = False
+        self._startup_in_progress = False  # True between MQTT init and end of initialize()
         self._loop = None
         self._collections_sync_running = False
         # Optional mirror directory for Home Assistant media (e.g., bind-mounted /media)
@@ -445,6 +459,8 @@ class monitor_and_display:
                 raise RuntimeError(f'CSV metadata unavailable at startup: {self.csv_path}')
         else:
             self._load_csv_metadata()
+        # Load persisted slideshow override before MQTT so state is ready when topics publish
+        self._load_slideshow_override()
         # Init MQTT if enabled
         if self.mqtt_enabled:
             self._init_mqtt()
@@ -478,6 +494,9 @@ class monitor_and_display:
                         await asyncio.sleep(0)  # yield before heavy scan
                         self._publish_collections_state()
                         self._publish_settings_state()
+                        self._startup_in_progress = True  # lock UI until initialize() completes
+                        self._publish_slideshow_state()
+                        self._publish_slideshow_available()
                         # Do not restore from cache on startup; retained MQTT selection will drive state
                         pass
                     await self.select_artwork()
@@ -797,6 +816,9 @@ class monitor_and_display:
             await self.change_art()
             self.start = time.time()
             self.write_program_data()
+        # Initialization complete — clear startup lock and let UI know it's safe
+        self._startup_in_progress = False
+        self._publish_slideshow_state()
         
     async def get_tv_content(self, category='MY-C0002'):
         '''
@@ -1077,7 +1099,14 @@ class monitor_and_display:
         # (works for single and multi-collection modes).
         collections = getattr(self, 'selected_collections', [])
 
-        if len(collections) > 0:
+        # When slideshow override is active, only upload the override files (ensure they stay on TV)
+        if self.slideshow_override is not None:
+            uploaded_paths = {v.get('path_rel') for v in self.uploaded_files.values()}
+            missing = [p for p in self.slideshow_override if p not in uploaded_paths]
+            if not missing:
+                return 0  # All override files already on TV; nothing to upload
+            new_files = missing[:max_uploads]
+        elif len(collections) > 0:
             new_files = await self.get_files_from_multiple_collections(collections, max_uploads)
         else:
             # Fallback: legacy single-folder mode when no collections are selected
@@ -1318,7 +1347,21 @@ class monitor_and_display:
         '''
         return list of all content ids available for selecting to display NOTE sets() are not ordered
         if not including favourites, order list by filename in self.uploaded_files
+        When a slideshow override is active, only returns content_ids for the override paths.
         '''
+        if self.slideshow_override is not None:
+            # Override mode: return content_ids in override order for paths currently on the TV
+            result = []
+            for path in self.slideshow_override:
+                base = os.path.basename(path)
+                for rec in self.uploaded_files.values():
+                    pr = rec.get('path_rel', '')
+                    if pr == path or pr == base or os.path.basename(pr) == base:
+                        cid = rec.get('content_id')
+                        if cid and cid not in result:
+                            result.append(cid)
+                            break
+            return result
         if self.fav:
             # Exclude from uploaded files and fav
             uploaded_ids = {v['content_id'] for k, v in self.uploaded_files.items() if k not in self.exclude and v['content_id'] not in self.exclude_content_ids}
@@ -1777,6 +1820,10 @@ class monitor_and_display:
                 "SAMSUNG_TV_ART_MAX_UPLOADS": str(os.environ.get('SAMSUNG_TV_ART_MAX_UPLOADS', '30')),
                 "SAMSUNG_TV_ART_UPDATE_MINUTES": str(int(max(0, (self.update_time or 0) / 60))),
                 "SAMSUNG_TV_ART_TV_IP": str(os.environ.get('SAMSUNG_TV_ART_TV_IP', self.ip or '')),
+                "SAMSUNG_TV_ART_SEQUENTIAL": '1' if self.sequential else '0',
+                "SAMSUNG_TV_ART_MQTT_HOST": str(os.environ.get('SAMSUNG_TV_ART_MQTT_HOST', self.mqtt_host or '')),
+                "SAMSUNG_TV_ART_MQTT_PORT": str(os.environ.get('SAMSUNG_TV_ART_MQTT_PORT', str(self.mqtt_port or 1883))),
+                "SAMSUNG_TV_ART_MQTT_USERNAME": str(os.environ.get('SAMSUNG_TV_ART_MQTT_USERNAME', self.mqtt_username or '')),
             }
             try:
                 self._publish_and_wait(self.mqtt_settings_state_topic, "online", qos=1, retain=True)
@@ -1788,6 +1835,127 @@ class monitor_and_display:
                 self._mqtt.publish(self.mqtt_settings_attr_topic, json.dumps(attrs, separators=(",", ":")), qos=0, retain=True)
         except Exception as e:
             self.log.warning('MQTT settings state publish failed: %s', e)
+
+    # ── Slideshow override persistence ──────────────────────────────────────
+
+    def _load_slideshow_override(self):
+        """Load persisted slideshow override from /data/slideshow_override.json."""
+        try:
+            if os.path.isfile(self.slideshow_override_path):
+                with open(self.slideshow_override_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                paths = data.get('paths', [])
+                self.slideshow_override = paths if paths else None
+                if self.slideshow_override:
+                    self.log.info('Loaded slideshow override with %d paths', len(self.slideshow_override))
+        except Exception as e:
+            self.log.warning('Failed to load slideshow override: %s', e)
+            self.slideshow_override = None
+
+    def _save_slideshow_override(self):
+        """Persist slideshow override to /data/slideshow_override.json."""
+        try:
+            os.makedirs('/data', exist_ok=True)
+            data = {'paths': list(self.slideshow_override) if self.slideshow_override else []}
+            with open(self.slideshow_override_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f)
+        except Exception as e:
+            self.log.warning('Failed to save slideshow override: %s', e)
+
+    def _publish_slideshow_state(self):
+        """Publish current slideshow mode, settings, and active paths to MQTT."""
+        if not self.mqtt_enabled or not self._mqtt:
+            return
+        try:
+            mode = 'override' if self.slideshow_override is not None else 'auto'
+            attrs = {
+                'mode': mode,
+                'sequential': self.sequential,
+                'update_minutes': int(max(0, (self.update_time or 0) / 60)),
+                'max_uploads': int(os.environ.get('SAMSUNG_TV_ART_MAX_UPLOADS', '10')),
+                'override_paths': list(self.slideshow_override) if self.slideshow_override else [],
+                'current_paths': [v.get('path_rel', k) for k, v in self.uploaded_files.items()],
+                'uploading': bool(self._refresh_in_progress or getattr(self, '_startup_in_progress', False)),
+            }
+            try:
+                self._publish_and_wait(self.mqtt_slideshow_state_topic, mode, qos=1, retain=True)
+            except Exception:
+                self._mqtt.publish(self.mqtt_slideshow_state_topic, mode, qos=1, retain=True)
+            try:
+                self._publish_and_wait(self.mqtt_slideshow_attr_topic, json.dumps(attrs, separators=(',', ':')), qos=1, retain=True)
+            except Exception:
+                self._mqtt.publish(self.mqtt_slideshow_attr_topic, json.dumps(attrs, separators=(',', ':')), qos=0, retain=True)
+        except Exception as e:
+            self.log.warning('MQTT slideshow state publish failed: %s', e)
+
+    def _publish_slideshow_available(self):
+        """Scan selected collections on disk and publish full image list to MQTT."""
+        if not self.mqtt_enabled or not self._mqtt:
+            return
+        try:
+            # Build a set of path_rel values currently uploaded to the TV
+            uploaded_paths = {v.get('path_rel', k) for k, v in self.uploaded_files.items()}
+            selected_set = set(self.selected_collections or [])
+
+            images = []
+            for collection in list(selected_set):
+                coll_path = os.path.join(self.media_root, collection)
+                if not os.path.isdir(coll_path):
+                    continue
+                try:
+                    files = sorted([
+                        f for f in os.listdir(coll_path)
+                        if f.lower().endswith(('.jpg', '.jpeg', '.png'))
+                        and f not in ('standby.png',)
+                    ])
+                except Exception:
+                    continue
+                for fname in files:
+                    path_rel = f"{collection}/{fname}"
+                    csv_rec = self._csv_by_file.get(fname, {})
+                    artist = (csv_rec.get('artist_name') or '').strip()
+                    if not artist:
+                        artist = getattr(self, '_dir_to_artist', {}).get(collection, '').strip()
+                    images.append({
+                        'path': path_rel,
+                        'folder': collection,
+                        'file': fname,
+                        'title': (csv_rec.get('title') or csv_rec.get('artwork_title') or '').strip(),
+                        'artist': artist,
+                        'year': (csv_rec.get('year') or '').strip(),
+                        'uploaded': path_rel in uploaded_paths,
+                    })
+                    if len(images) >= 500:  # Cap to keep MQTT payload manageable
+                        break
+                if len(images) >= 500:
+                    break
+
+            payload = json.dumps({'images': images}, separators=(',', ':'))
+            try:
+                self._publish_and_wait(self.mqtt_slideshow_available_topic, payload, qos=1, retain=True)
+            except Exception:
+                self._mqtt.publish(self.mqtt_slideshow_available_topic, payload, qos=0, retain=True)
+            self.log.info('Published slideshow available: %d images across %d collections', len(images), len(selected_set))
+        except Exception as e:
+            self.log.warning('MQTT slideshow available publish failed: %s', e)
+
+    async def _apply_slideshow_override(self, paths, req_id=None):
+        """Upload any missing override files, activate the override, and trigger change_art."""
+        try:
+            uploaded_paths = {v.get('path_rel', k) for k, v in self.uploaded_files.items()}
+            to_upload = [p for p in paths if p not in uploaded_paths]
+            if to_upload:
+                self._publish_ack('slideshow/override/set', 'progress', f'Uploading {len(to_upload)} file(s)...', req_id)
+                await self.upload_files(to_upload)
+                await asyncio.sleep(2)
+            self.slideshow_override = paths
+            self._save_slideshow_override()
+            self.shown_content_ids = set()
+            self._publish_slideshow_state()
+            await self.change_art()
+            self._publish_ack('slideshow/override/set', 'ok', f'Override applied with {len(paths)} image(s)', req_id)
+        except Exception as e:
+            self._publish_ack('slideshow/override/set', 'error', str(e), req_id)
 
     def _write_overrides(self, updates: dict) -> bool:
         """Write overrides to /data/overrides.env, merging with existing content."""
@@ -1809,6 +1977,7 @@ class monitor_and_display:
                 'SAMSUNG_TV_ART_MAX_UPLOADS',
                 'SAMSUNG_TV_ART_UPDATE_MINUTES',
                 'SAMSUNG_TV_ART_TV_IP',
+                'SAMSUNG_TV_ART_SEQUENTIAL',
             }
             for k, v in updates.items():
                 if k in allowed:
@@ -2101,6 +2270,14 @@ class monitor_and_display:
                         apply_runtime['UPDATE_SECONDS'] = max(0, minutes * 60)
                     if 'SAMSUNG_TV_ART_TV_IP' in data:
                         updates['SAMSUNG_TV_ART_TV_IP'] = str(data['SAMSUNG_TV_ART_TV_IP']).strip()
+                    if 'SAMSUNG_TV_ART_MQTT_HOST' in data:
+                        updates['SAMSUNG_TV_ART_MQTT_HOST'] = str(data['SAMSUNG_TV_ART_MQTT_HOST']).strip()
+                    if 'SAMSUNG_TV_ART_MQTT_PORT' in data:
+                        updates['SAMSUNG_TV_ART_MQTT_PORT'] = str(int(data['SAMSUNG_TV_ART_MQTT_PORT']))
+                    if 'SAMSUNG_TV_ART_MQTT_USERNAME' in data:
+                        updates['SAMSUNG_TV_ART_MQTT_USERNAME'] = str(data['SAMSUNG_TV_ART_MQTT_USERNAME']).strip()
+                    if 'SAMSUNG_TV_ART_MQTT_PASSWORD' in data:
+                        updates['SAMSUNG_TV_ART_MQTT_PASSWORD'] = str(data['SAMSUNG_TV_ART_MQTT_PASSWORD'])
                 except Exception:
                     self._publish_ack('settings/set', 'error', 'Validation failed', None)
                     return
@@ -2123,13 +2300,14 @@ class monitor_and_display:
                     except Exception:
                         pass
                     self._publish_settings_state()
-                    # Indicate if restart is recommended (e.g., TV IP change)
+                    # Indicate if restart is recommended (e.g., TV IP or MQTT change)
                     msg = 'Settings updated'
                     try:
                         if 'SAMSUNG_TV_ART_TV_IP' in updates and updates['SAMSUNG_TV_ART_TV_IP'] and updates['SAMSUNG_TV_ART_TV_IP'] != str(self.ip):
                             msg += ' (TV IP change will apply after restart)'
-                            # Stash new ip for reference; reconnect happens on restart
                             self.ip = updates['SAMSUNG_TV_ART_TV_IP']
+                        if any(k in updates for k in ('SAMSUNG_TV_ART_MQTT_HOST', 'SAMSUNG_TV_ART_MQTT_PORT', 'SAMSUNG_TV_ART_MQTT_USERNAME', 'SAMSUNG_TV_ART_MQTT_PASSWORD')):
+                            msg += ' (MQTT changes will apply after restart)'
                     except Exception:
                         pass
                     self._publish_ack('settings/set', 'ok', msg, None)
@@ -2143,6 +2321,50 @@ class monitor_and_display:
                     os._exit(0)
                 except Exception:
                     pass
+                return
+            if cmd == 'slideshow/settings/set':
+                if not isinstance(data, dict):
+                    self._publish_ack('slideshow/settings/set', 'error', 'Invalid JSON', req_id)
+                    return
+                updates = {}
+                try:
+                    if 'sequential' in data:
+                        self.sequential = bool(data['sequential'])
+                        updates['SAMSUNG_TV_ART_SEQUENTIAL'] = '1' if self.sequential else '0'
+                    if 'update_minutes' in data:
+                        minutes = max(0, int(float(data['update_minutes'])))
+                        self.update_time = minutes * 60
+                        self.start = time.time()  # Reset slideshow timer
+                        updates['SAMSUNG_TV_ART_UPDATE_MINUTES'] = str(minutes)
+                except Exception:
+                    self._publish_ack('slideshow/settings/set', 'error', 'Validation failed', req_id)
+                    return
+                self._write_overrides(updates)
+                self._publish_slideshow_state()
+                self._publish_settings_state()
+                self._publish_ack('slideshow/settings/set', 'ok', 'Slideshow settings updated', req_id)
+                return
+            if cmd == 'slideshow/override/set':
+                paths = []
+                if data and 'paths' in data and isinstance(data['paths'], list):
+                    paths = [str(p).strip() for p in data['paths'] if str(p).strip()]
+                if not paths:
+                    self._publish_ack('slideshow/override/set', 'error', 'No paths provided', req_id)
+                    return
+                fut = self._schedule_command_coro(self._apply_slideshow_override(paths, req_id), 'slideshow/override/set')
+                if not fut:
+                    self._publish_ack('slideshow/override/set', 'error', 'Failed to queue override apply', req_id)
+                return
+            if cmd == 'slideshow/override/clear':
+                self.slideshow_override = None
+                self._save_slideshow_override()
+                self.shown_content_ids = set()
+                self._publish_slideshow_state()
+                self._publish_ack('slideshow/override/clear', 'ok', 'Slideshow override cleared; auto mode restored', req_id)
+                return
+            if cmd == 'slideshow/available/request':
+                self._publish_slideshow_available()
+                self._publish_ack('slideshow/available/request', 'ok', 'Available list published', req_id)
                 return
             # Unknown command
             self._publish_ack(cmd, 'error', 'Unknown command', req_id)
@@ -2435,6 +2657,7 @@ class monitor_and_display:
             self._publish_ack('collections/refresh', status, msg, req_id)
 
         self._refresh_in_progress = True
+        self._publish_slideshow_state()
         try:
             if skip_started_ack:
                 ack('progress', 'Preparing TV for update — switching to standby...')
@@ -2470,9 +2693,14 @@ class monitor_and_display:
             raise
         finally:
             self._refresh_in_progress = False
+            self._publish_slideshow_state()
 
     async def _do_collections_refresh(self, req_id=None):
-        """MQTT-triggered refresh: prunes mirror then reseeds with ack progress messages."""
+        """MQTT-triggered refresh: clears slideshow override, prunes mirror then reseeds."""
+        if self.slideshow_override is not None:
+            self.slideshow_override = None
+            self._save_slideshow_override()
+            self._publish_slideshow_state()
         self._mirror_prune_to_selected()
         await self._do_full_reseed(req_id=req_id)
             
