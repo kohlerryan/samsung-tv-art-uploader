@@ -1165,6 +1165,17 @@ class FrameTVArtCard extends HTMLElement {
             border-bottom: 1px solid #333;
           }
           .ftv-op-title { font-weight: 600; font-size: 0.95em; }
+          .ftv-panel-header {
+            display: flex;
+            align-items: center;
+            padding: 10px 14px 8px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            font-size: 0.78em;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: rgba(255,255,255,0.45);
+          }
           .ftv-op-counter { font-size: 0.8em; color: rgba(255,255,255,0.55); }
           .ftv-op-warn { padding: 6px 14px 0; font-size: 0.8em; color: #ffb400; }
           .ftv-op-actions { display: flex; gap: 8px; padding: 8px 14px; }
@@ -1241,6 +1252,7 @@ class FrameTVArtCard extends HTMLElement {
             </button>
           </div>
           <div class="ftv-override-popup${this._overridePanelOpen ? ' open' : ''}" id="ftv-override-popup">
+            <div class="ftv-panel-header">Slideshow</div>
             <div class="ftv-op-settings">
               <div class="ftv-op-settings-row">
                 <select class="ftv-op-select" id="ftv-op-type">
@@ -1301,6 +1313,7 @@ class FrameTVArtCard extends HTMLElement {
             <div class="ftv-refresh-log"></div>
           </div>
           <div class="ftv-settings" id="ftv-settings">
+            <div class="ftv-panel-header">Settings</div>
             <div class="ftv-field">
               <div class="ftv-label">Frame TV IP address</div>
               <input class="ftv-input" id="ftv-tv-ip" type="text" placeholder="e.g. 10.83.21.57" />
