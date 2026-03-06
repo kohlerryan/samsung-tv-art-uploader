@@ -302,30 +302,23 @@
             <button id="sl-settings-apply" disabled style="opacity:0.6;">Apply</button>
           </div>
           <div class="hint" style="margin-top:4px;">Interval: minutes between changes (0=disabled). Max uploads: artwork stored on TV.</div>
-          <!-- Override toggle -->
-          <div style="display:flex; align-items:center; gap:10px; margin-top:14px;">
-            <label class="sl-switch">
-              <input type="checkbox" id="sl-override-toggle" disabled>
-              <span class="sl-slider" style="opacity:0.4;"></span>
-            </label>
-            <span style="color:#f0ece6; font-size:14px;">Override auto slideshow</span>
-            <span id="sl-mode-badge" class="hint" style="margin-left:auto;"></span>
-          </div>
-          <!-- Override panel (shown when toggle is on) -->
-          <div id="sl-override-panel" style="display:none; margin-top:12px;">
+          <!-- Override panel -->
+          <div id="sl-override-panel" style="margin-top:14px;">
             <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
               <span id="sl-counter" class="hint">0 / 10 selected</span>
+              <span id="sl-mode-badge" class="hint"></span>
               <div style="display:flex; align-items:center; gap:10px;">
                 <input type="range" id="sl-size" class="sl-size-slider" min="80" max="260" value="130" title="Thumbnail size">
+                <button id="sl-override-reset" style="display:none; padding:8px 14px; width:auto; height:auto;">Reset</button>
                 <button id="sl-override-apply" class="ftv-apply" disabled style="opacity:0.6; padding:8px 14px; width:auto; height:auto;">Apply Override</button>
-                <button id="sl-override-clear" class="ftv-clear" style="padding:8px 14px; width:auto; height:auto;">Clear Override</button>
+                <button id="sl-override-clear" class="ftv-clear" style="display:none; padding:8px 14px; width:auto; height:auto;">Clear Override</button>
               </div>
+            </div>
+            <div id="sl-uploading-warn" style="display:none; padding:6px 0 0; font-size:0.8em; color:#ffb400;">
+              &#9888; Uploading — grid locked
             </div>
             <div id="sl-grid" class="sl-grid"></div>
             <div id="sl-grid-hint" class="hint" style="margin-top:6px;"></div>
-            <div id="sl-uploading-warn" style="display:none; margin-top:10px; padding:10px 12px; background:#3a2800; border:1px solid #7a5500; border-radius:8px; color:#f0c060; font-size:13px;">
-              ⏳ TV is currently updating artwork — override cannot be applied until the update finishes.
-            </div>
           </div>
           <div id="sl-msg" class="hint" style="margin-top:8px;"></div>
         </div>
@@ -406,7 +399,7 @@
               const d = JSON.parse(payload.toString() || '{}');
               slideshowAvailable = d.images || [];
               // If override is active and selection was never seeded, seed it now
-              if ($slToggle && $slToggle.checked && slideshowSelected.size === 0 && slideshowOverridePaths.length) {
+              if (slideshowMode === 'override' && slideshowSelected.size === 0 && slideshowOverridePaths.length) {
                 slideshowSelected = new Set(slideshowOverridePaths);
               }
               renderSlideshowGrid();
@@ -444,6 +437,7 @@
                   setTimeout(() => {
                     refreshInProgress = false;
                     refreshLog = [];
+                    setInfo._lastKey = null;
                     try { sessionStorage.removeItem('ftvRefreshLog'); sessionStorage.removeItem('ftvRefreshActive'); } catch(_) {}
                     setInfo(lastAttrs || {});
                   }, status === 'ok' ? 8000 : 12000);
@@ -633,6 +627,7 @@
             if (refreshInProgress) {
               refreshInProgress = false;
               refreshLog = [];
+              setInfo._lastKey = null;
               try { sessionStorage.removeItem('ftvRefreshLog'); sessionStorage.removeItem('ftvRefreshActive'); } catch(_) {}
               const $log = document.getElementById('refresh-log');
               if ($log) $log.innerHTML = '';
@@ -647,6 +642,10 @@
 
     function setInfo(attrs) {
       if (refreshInProgress) return;
+      // Skip re-render if the display-relevant fields haven't changed
+      const _key = [attrs.file, attrs.artwork_title, attrs.artist_name, attrs.artwork_year].join('|');
+      if (setInfo._lastKey && setInfo._lastKey === _key) return;
+      setInfo._lastKey = _key;
       const $np = document.getElementById('viewNowPlaying');
       const $log = document.getElementById('refresh-log');
       if ($log) $log.innerHTML = '';
@@ -663,6 +662,8 @@
       const normalizedFile = String(file || '').trim().toLowerCase();
       const isStandbyLike = !normalizedFile || normalizedFile === 'standby.png' || normalizedFile === 'unknown' || normalizedFile === 'unavailable' || normalizedFile === 'none';
       const isStandby = normalizedFile === 'standby.png';
+      slideshowStandby = isStandbyLike;
+      updateGridLock();
 
       let t = '';
       if (isStandbyLike) {
@@ -899,15 +900,13 @@
     const $slInterval   = document.getElementById('sl-interval');
     const $slMaxUploads = document.getElementById('sl-max-uploads');
     const $slApply      = document.getElementById('sl-settings-apply');
-    const $slToggle    = document.getElementById('sl-override-toggle');
-    const $slPanel     = document.getElementById('sl-override-panel');
-
     function requestSlideshowAvailable() {
       if (client) client.publish(`${TOPIC_CMD_PREFIX}/slideshow/available/request`, JSON.stringify({ req_id: Date.now() }), { qos: 1 });
     }
 
     const $slCounter   = document.getElementById('sl-counter');
     const $slOApply    = document.getElementById('sl-override-apply');
+    const $slOReset    = document.getElementById('sl-override-reset');
     const $slOClear    = document.getElementById('sl-override-clear');
     const $slGrid      = document.getElementById('sl-grid');
     const $slGridHint  = document.getElementById('sl-grid-hint');
@@ -928,23 +927,84 @@
     let slMaxUploadsBaseline = 10;
 
     let slideshowUploading = false;
+    let slideshowMode = 'auto';
+    let slideshowStandby = false;
+    let slideshowReverting = false;
+    let slideshowPostClear = false;         // blocks size===0 reseed from stale current_paths after clear
+    let slideshowClearRefreshPending = false; // set when Clear fires collections/refresh; cleared when that refresh finishes
 
     function updateSlideshowState(data) {
       try {
+        const wasUploading = slideshowUploading;
+        const prevMode = slideshowMode;
         slideshowUploading = !!(data.uploading);
+        const uploadJustFinished = wasUploading && !slideshowUploading;
         slideshowMaxUploads = parseInt(data.max_uploads || 10, 10);
         if ($slMaxUploads && !$slMaxUploads.dataset.dirty) $slMaxUploads.value = slideshowMaxUploads;
         slideshowCurrentPaths = data.current_paths || [];
         slideshowOverridePaths = data.override_paths || [];
         const mode = data.mode || 'auto';
+        slideshowMode = mode;
         const isOverride = mode === 'override';
+        const modeChangedToAuto = prevMode === 'override' && !isOverride;
         const $badge = document.getElementById('sl-mode-badge');
         if ($badge) { $badge.textContent = isOverride ? '● Override active' : ''; $badge.style.color = '#2f7fbf'; }
-        // Sync toggle to server state without triggering change event
-        if ($slToggle && $slToggle.checked !== isOverride) {
-          $slToggle.checked = isOverride;
-          if ($slPanel) $slPanel.style.display = isOverride ? '' : 'none';
+        // Cancel any pending feedback timers and let MQTT immediately own the button state
+        if ($slOApply && $slOApply._restoreTimer) { clearTimeout($slOApply._restoreTimer); $slOApply._restoreTimer = null; $slOApply._applying = false; }
+        if ($slOClear && $slOClear._restoreTimer) { clearTimeout($slOClear._restoreTimer); $slOClear._restoreTimer = null; }
+        if ($slOApply) { $slOApply.textContent = isOverride ? 'Update Override' : 'Apply Override'; $slOApply.style.opacity = ''; }
+        if ($slOClear) { $slOClear.style.display = isOverride ? '' : 'none'; $slOClear.textContent = 'Clear Override'; $slOClear.disabled = false; }
+        // Seed selection:
+        //   - modeChangedToAuto: clear fired. current_paths is stale (all ever-uploaded).
+        //     Always postClear=true. Keep existing selection visible if upload in progress.
+        //   - uploadJustFinished + override: override_paths confirmed, reseed from them.
+        //   - uploadJustFinished + auto: still stale — keep grid empty, postClear stays true.
+        //   - isOverride && prevMode!==override: new override applied, reset postClear.
+        //   - size===0 initial load: seed from appropriate paths (guarded by !postClear).
+        if (modeChangedToAuto) {
+          // Override just cleared. current_paths is stale (union of all ever-uploaded files).
+          // Always set postClear to block any reseed from it — grid should stay empty.
+          slideshowPostClear = true;
+          if (slideshowUploading) {
+            // Upload already in progress: keep existing selection visible (locked) during the cycle.
+            slideshowReverting = true;
+          } else {
+            slideshowReverting = false;
+            slideshowSelected = new Set();
+          }
+        } else if (isOverride && prevMode !== 'override') {
+          // New override applied (auto → override): override_paths are authoritative, reset flags.
+          slideshowPostClear = false;
+          slideshowReverting = false;
+        } else if (uploadJustFinished) {
+          slideshowReverting = false;
+          if (isOverride) {
+            // Override upload completed: override_paths are now confirmed by server.
+            slideshowPostClear = false;
+            slideshowSelected = new Set(
+              slideshowOverridePaths.length ? slideshowOverridePaths : slideshowCurrentPaths
+            );
+          } else if (slideshowClearRefreshPending) {
+            // Full collections/refresh triggered by Clear Override has completed.
+            // current_paths is now fresh and authoritative — seed the grid from it.
+            slideshowClearRefreshPending = false;
+            slideshowPostClear = false;
+            slideshowSelected = new Set(slideshowCurrentPaths);
+          } else {
+            // Background auto cycle: current_paths is still unreliable. Keep grid empty.
+            slideshowPostClear = true;
+            slideshowSelected = new Set();
+          }
+        } else if (!slideshowReverting && !slideshowPostClear && slideshowSelected.size === 0) {
+          // Initial load or settled state: seed from appropriate paths.
+          slideshowSelected = new Set(
+            isOverride
+              ? (slideshowOverridePaths.length ? slideshowOverridePaths : slideshowCurrentPaths)
+              : slideshowCurrentPaths
+          );
         }
+        requestSlideshowAvailable();
+        if (slideshowAvailable.length) renderSlideshowGrid();
         // Pre-fill settings inputs if not dirty
         slSeqBaseline = !!(data.sequential);
         slIntervalBaseline = parseInt(data.update_minutes || 0, 10);
@@ -953,35 +1013,21 @@
         if ($slInterval && !$slInterval.dataset.dirty) $slInterval.value = slIntervalBaseline;
         if ($slMaxUploads && !$slMaxUploads.dataset.dirty) $slMaxUploads.value = slideshowMaxUploads;
         markSlSettingsDirty();
-        // If override active and available list loaded, seed selection from override paths
-        if (isOverride && slideshowAvailable.length) {
-          slideshowSelected = new Set(slideshowOverridePaths);
-          renderSlideshowGrid();
-        }
         updateSlCounter();
-        // Lock/unlock override toggle based on uploading state
-        // If override was active before restart (mode='override'), keep panel accessible but lock Apply
-        // If no override was set and uploading, prevent enabling override mid-upload
-        const $warn = document.getElementById('sl-uploading-warn');
-        if ($warn) $warn.style.display = slideshowUploading ? '' : 'none';
-        if ($slGrid) $slGrid.style.pointerEvents = slideshowUploading ? 'none' : '';
-        if ($slGrid) $slGrid.style.opacity = slideshowUploading ? '0.45' : '';
-        if ($slToggle) {
-        // Lock toggle when uploading OR when TV is still on standby (stale retained
-        // MQTT message could arrive with uploading=false before startup completes)
-        const artworkFile = String((lastAttrs && lastAttrs.file) || '').trim().toLowerCase();
-        const isStandbyFile = !artworkFile || ['standby.png', 'unknown', 'unavailable', 'none', ''].includes(artworkFile);
-        const allowToggle = (!slideshowUploading && !isStandbyFile) || isOverride;
-          $slToggle.disabled = !allowToggle;
-          $slToggle.closest('.sl-switch').style.opacity = allowToggle ? 1 : 0.4;
-          $slToggle.closest('.sl-switch').title = !allowToggle ? (slideshowUploading ? 'Uploading in progress — wait until complete' : 'Unavailable until artwork is loaded') : '';
-          const $slider = $slToggle.closest('.sl-switch').querySelector('.sl-slider');
-          if ($slider) $slider.style.opacity = '';
-        }
-        if ($slOApply) {
-          if (slideshowUploading) { $slOApply.disabled = true; $slOApply.style.opacity = 0.4; }
-        }
+        updateGridLock();
       } catch (_) {}
+    }
+
+    function updateGridLock() {
+      const locked = slideshowUploading || (slideshowStandby && slideshowMode !== 'override');
+      const $warn = document.getElementById('sl-uploading-warn');
+      if ($warn) {
+        $warn.style.display = locked ? '' : 'none';
+        $warn.textContent = slideshowUploading ? '\u26a0 Uploading \u2014 grid locked' : '\u26a0 Standby \u2014 grid locked';
+      }
+      if ($slGrid) { $slGrid.style.pointerEvents = locked ? 'none' : ''; $slGrid.style.opacity = locked ? '0.45' : ''; }
+      if ($slOApply && locked) { $slOApply.disabled = true; $slOApply.style.opacity = 0.4; }
+      if ($slOReset && locked) $slOReset.style.display = 'none';
     }
 
     function markSlSettingsDirty() {
@@ -994,15 +1040,27 @@
       $slApply.style.opacity = dirty ? 1 : 0.6;
     }
 
+    function selectionMatchesBaseline() {
+      // After clearing override: empty grid is the correct post-clear state — treat as in-sync.
+      if (slideshowPostClear) return true;
+      const baseline = slideshowMode === 'override' ? slideshowOverridePaths : slideshowCurrentPaths;
+      // overridePaths empty while mode=override means the server hasn't confirmed the
+      // applied paths yet — treat as in-sync so Apply stays disabled during that window.
+      if (slideshowMode === 'override' && slideshowOverridePaths.length === 0) return true;
+      if (slideshowSelected.size !== baseline.length) return false;
+      return baseline.every(p => slideshowSelected.has(p));
+    }
+
     function updateSlCounter() {
       if (!$slCounter) return;
       const count = slideshowSelected.size;
       $slCounter.textContent = `${count} / ${slideshowMaxUploads} selected`;
       if ($slOApply) {
-        const canApply = count > 0 && !slideshowUploading;
+        const canApply = count > 0 && !slideshowUploading && !selectionMatchesBaseline();
         $slOApply.disabled = !canApply;
         $slOApply.style.opacity = canApply ? 1 : (slideshowUploading ? 0.4 : 0.6);
       }
+      if ($slOReset) $slOReset.style.display = selectionMatchesBaseline() ? 'none' : '';
     }
 
     function renderSlideshowGrid() {
@@ -1093,37 +1151,48 @@
       };
     }
 
-    if ($slToggle) {
-      $slToggle.addEventListener('change', () => {
-        const on = $slToggle.checked;
-        if ($slPanel) $slPanel.style.display = on ? '' : 'none';
-        if (on) {
-          requestSlideshowAvailable();
-          // Pre-seed selection from active override or current TV images
-          slideshowSelected = new Set(slideshowOverridePaths.length ? slideshowOverridePaths : slideshowCurrentPaths);
-          updateSlCounter();
-          renderSlideshowGrid();
-        } else {
-          if (client) client.publish(`${TOPIC_CMD_PREFIX}/slideshow/override/clear`, JSON.stringify({ req_id: Date.now() }), { qos: 1 });
-        }
-      });
-    }
-
     if ($slOApply) {
       $slOApply.onclick = () => {
         if (!client || !slideshowSelected.size) return;
         const paths = Array.from(slideshowSelected);
+        const origLabel = $slOApply.textContent;
+        $slOApply.disabled = true;
+        $slOApply._applying = true;
+        $slOApply.textContent = 'Applying…';
+        $slOApply.style.opacity = 0.7;
         client.publish(`${TOPIC_CMD_PREFIX}/slideshow/override/set`, JSON.stringify({ paths, req_id: Date.now() }), { qos: 1 });
+        // Safety fallback only — MQTT response will cancel this and set state directly
+        $slOApply._restoreTimer = setTimeout(() => {
+          $slOApply._applying = false;
+          $slOApply._restoreTimer = null;
+          $slOApply.textContent = slideshowMode === 'override' ? 'Update Override' : origLabel;
+          const canApply = slideshowSelected.size > 0 && !slideshowUploading && !selectionMatchesBaseline();
+          $slOApply.disabled = !canApply;
+          $slOApply.style.opacity = canApply ? 1 : 0.6;
+        }, 8000);
+      };
+    }
+
+    if ($slOReset) {
+      $slOReset.onclick = () => {
+        const baseline = slideshowMode === 'override' ? slideshowOverridePaths : slideshowCurrentPaths;
+        slideshowSelected = new Set(baseline);
+        updateSlCounter();
+        renderSlideshowGrid();
       };
     }
 
     if ($slOClear) {
       $slOClear.onclick = () => {
         if (!client) return;
-        client.publish(`${TOPIC_CMD_PREFIX}/slideshow/override/clear`, JSON.stringify({ req_id: Date.now() }), { qos: 1 });
-        slideshowSelected = new Set();
-        if ($slToggle) $slToggle.checked = false;
-        if ($slPanel) $slPanel.style.display = 'none';
+        $slOClear.disabled = true;
+        $slOClear.textContent = 'Clearing…';
+        // Fire a full collections/refresh: clears override, prunes TV storage,
+        // and reseeds from current collections — guaranteeing current_paths is fresh.
+        slideshowClearRefreshPending = true;
+        client.publish(`${TOPIC_CMD_PREFIX}/collections/refresh`, JSON.stringify({ req_id: Date.now() }), { qos: 1 });
+        // Safety fallback — modeChangedToAuto MQTT response normally cancels this first
+        $slOClear._restoreTimer = setTimeout(() => { $slOClear._restoreTimer = null; $slOClear.disabled = false; $slOClear.textContent = 'Clear Override'; }, 8000);
       };
     }
   </script>
