@@ -913,6 +913,17 @@
       if (client) client.publish(`${TOPIC_CMD_PREFIX}/slideshow/available/request`, JSON.stringify({ req_id: Date.now() }), { qos: 1 });
     }
     let _availRetryTimer = null;
+    let _postUploadRefreshTimer = null;       // retries available request after upload completes
+    function schedulePostUploadAvailableRefresh(remaining) {
+      if (_postUploadRefreshTimer) clearTimeout(_postUploadRefreshTimer);
+      if (remaining <= 0) return;
+      _postUploadRefreshTimer = setTimeout(() => {
+        _postUploadRefreshTimer = null;
+        requestSlideshowAvailable();
+        schedulePostUploadAvailableRefresh(remaining - 1);
+      }, 5000);
+    }
+
     function scheduleAvailableRetry() {
       if (_availRetryTimer) return; // already scheduled
       _availRetryTimer = setTimeout(function retry() {
@@ -958,6 +969,10 @@
         const prevMode = slideshowMode;
         slideshowUploading = !!(data.uploading);
         const uploadJustFinished = wasUploading && !slideshowUploading;
+        // Cancel any in-flight post-upload refresh when a new upload starts
+        if (slideshowUploading && _postUploadRefreshTimer) {
+          clearTimeout(_postUploadRefreshTimer); _postUploadRefreshTimer = null;
+        }
         slideshowMaxUploads = parseInt(data.max_uploads || 10, 10);
         if ($slMaxUploads && !$slMaxUploads.dataset.dirty) $slMaxUploads.value = slideshowMaxUploads;
         slideshowCurrentPaths = data.current_paths || [];
@@ -996,6 +1011,7 @@
           slideshowPostClear = false;
           slideshowReverting = false;
         } else if (uploadJustFinished) {
+          schedulePostUploadAvailableRefresh(5);
           slideshowReverting = false;
           if (isOverride) {
             // Override upload completed: override_paths are now confirmed by server.

@@ -40,6 +40,7 @@ class FrameTVArtCard extends HTMLElement {
     this._slideshowAvailUnsubscribe = null;
     this._slideshowPostClear = false;           // blocks stale current_paths reseed after clear
     this._slideshowClearRefreshPending = false;  // set when Clear fires collections/refresh
+    this._postUploadRefreshTimer = null;         // retries available request after upload completes
     // Restore progress log if page was refreshed mid-sync (max 15 min TTL)
     try {
       const _raw = sessionStorage.getItem('ftvHaRefreshLog');
@@ -374,6 +375,11 @@ class FrameTVArtCard extends HTMLElement {
     this._slideshowUpdateMins = parseInt((payload && payload.update_minutes) || 0, 10);
     this._slideshowMode = mode;
     const uploadJustFinished = prevUploading && !this._slideshowUploading;
+    // Cancel any in-flight post-upload refresh when a new upload starts
+    if (this._slideshowUploading && this._postUploadRefreshTimer) {
+      clearTimeout(this._postUploadRefreshTimer);
+      this._postUploadRefreshTimer = null;
+    }
     if (mode !== prevMode) {
       if (mode === 'override') {
         // New override applied (auto → override): paths are authoritative, reset post-clear flag.
@@ -413,6 +419,7 @@ class FrameTVArtCard extends HTMLElement {
       }
       if (this._overridePanelOpen) {
         if (uploadJustFinished) {
+          this._schedulePostUploadRefresh(5);
           this._slideshowReverting = false;
           if (mode === 'override') {
             // Override upload completed: override_paths are confirmed by server.
@@ -446,6 +453,21 @@ class FrameTVArtCard extends HTMLElement {
         this._updateOverrideCounter();
       }
     }
+  }
+
+  _schedulePostUploadRefresh(remaining) {
+    if (this._postUploadRefreshTimer) clearTimeout(this._postUploadRefreshTimer);
+    if (remaining <= 0) return;
+    this._postUploadRefreshTimer = setTimeout(() => {
+      this._postUploadRefreshTimer = null;
+      if (!this._hass) return;
+      this._hass.callService('mqtt', 'publish', {
+        topic: 'frame_tv/cmd/slideshow/available/request',
+        payload: JSON.stringify({ req_id: Date.now() }),
+        qos: 1, retain: false,
+      }).catch(() => {});
+      this._schedulePostUploadRefresh(remaining - 1);
+    }, 5000);
   }
 
   _handleSlideshowAvailableMessage(message) {
