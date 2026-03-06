@@ -84,7 +84,8 @@
     #viewNowPlaying.standby-mode .bg   { order: 2; margin-top: 10px; }
 
     /* Tabs styled like folder (pentaflex) tabs */
-    .tabbar { display: flex; gap: 6px; margin: 0 0 0 4px; }
+    .tabbar { display: flex; gap: 6px; margin: 0 0 0 4px; align-items: flex-end; }
+    .version-tag { margin-left: auto; padding: 4px 8px; font-size: 11px; color: #7a6e68; letter-spacing: .4px; align-self: center; user-select: none; }
     .tab {
       padding: 8px 14px;
       background: #2a2623;
@@ -249,6 +250,7 @@
         <div class="tab active" data-tab="nowplaying">Now Showing</div>
         <div class="tab" data-tab="slideshow">Slideshow</div>
         <div class="tab" data-tab="settings">Settings</div>
+        <span class="version-tag">v0.2.0-beta.2</span>
       </div>
       <div class="tabcontent">
         <div id="viewNowPlaying">

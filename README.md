@@ -8,7 +8,10 @@ Built on top of [NickWaterton/samsung-tv-ws-api](https://github.com/NickWaterton
 
 | Home Assistant Card | Web UI |
 |---|---|
-| ![HA Card](ha-card/images/hacard.png) | ![Web UI](assets/webui.png) |
+| ![HA Card](assets/hacard_v0.2.0.png) | ![Web UI](assets/webui_now_showing_v0.2.0.png) |
+
+> **⚠️ Breaking Change — v0.2.0-beta.1+:**  
+> The Slideshow Override feature requires **both** the uploader server **and** the Home Assistant card to be on `v0.2.0-beta.1` or later. Mixing a v0.2.0 server with a v0.1.x card (or vice versa) will cause the slideshow panel to malfunction. If you are not using the Slideshow Override feature this does not affect you.
 
 ## Features
 
@@ -281,12 +284,17 @@ See `examples/samsung-tv-art.env.example` for the full list with descriptions.
 
 When `SAMSUNG_TV_ART_LOCAL_WEB=true`, a web interface is available at `http://samsung-tv-art.local:8080`.
 
-| Collections & Control | Settings |
+| Now Showing | Slideshow Override |
 |---|---|
-| ![Web UI Control](assets/webui_control.png) | ![Web UI Settings](assets/webui_settings.png) |
+| ![Web UI Now Showing](assets/webui_now_showing_v0.2.0.png) | ![Web UI Slideshow](assets/webui_slideshow_v0.2.0.png) |
+
+| Apply Override | Clear Override |
+|---|---|
+| ![Web UI Apply Override](assets/webui_slideshow_apply_overrides_v0.2.0.png) | ![Web UI Clear Override](assets/webui_slideshow_clear_overrides_v0.2.0.png) |
 
 - **Collections** tab — select which collections are active and trigger a refresh
-- **Settings** tab — adjust rotation interval, upload limit, sequence mode, and more without restarting the container
+- **Slideshow** tab — pick a fixed set of images to pin to the TV (Override mode), or configure the rotation interval and upload limit
+- **Settings** tab — adjust MQTT/TV connection settings without restarting the container
 
 ## Home Assistant card
 
@@ -295,9 +303,13 @@ The Lovelace card is available as a standalone repository: **[kohlerryan/samsung
 It is also bundled in this repo under `ha-card/`.  
 See [`ha-card/README.md`](ha-card/README.md) for installation steps and [`examples/ha-lovelace-card.yaml.example`](examples/ha-lovelace-card.yaml.example) for a complete card configuration.
 
-| Card — Collections & Control | Card — Settings |
+| Card — Main | Card — Slideshow Override |
 |---|---|
-| ![HA Card Control](ha-card/images/hacard_control.png) | ![HA Card Settings](ha-card/images/hacard_settings.png) |
+| ![HA Card](assets/hacard_v0.2.0.png) | ![HA Card Slideshow](assets/hacard_slideshow_v0.2.0.png) |
+
+| Card — Settings |
+|---|
+| ![HA Card Settings](assets/hacard_settings_v0.2.0.png) |
 
 ### Mixed-content / image URLs
 
@@ -349,10 +361,14 @@ samsung-tv-art/
 ├── uploader.py            — main TV uploader and MQTT integration
 ├── serve.py               — minimal HTTP server for the web UI
 ├── assets/
-│   ├── standby.png        — default standby artwork baked into the image
-│   ├── webui.png          — web UI screenshot
-│   ├── webui_control.png  — web UI collections/control panel screenshot
-│   └── webui_settings.png — web UI settings panel screenshot
+│   ├── standby.png                              — default standby artwork baked into the image
+│   ├── hacard_v0.2.0.png                        — HA card main screenshot
+│   ├── hacard_slideshow_v0.2.0.png              — HA card slideshow override panel
+│   ├── hacard_settings_v0.2.0.png               — HA card settings panel
+│   ├── webui_now_showing_v0.2.0.png             — web UI now showing tab
+│   ├── webui_slideshow_v0.2.0.png               — web UI slideshow tab
+│   ├── webui_slideshow_apply_overrides_v0.2.0.png  — web UI apply override
+│   └── webui_slideshow_clear_overrides_v0.2.0.png  — web UI after clearing override
 ├── ha-card/
 │   ├── samsung-tv-art-card.js   — Home Assistant Lovelace card
 │   ├── README.md
