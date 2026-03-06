@@ -404,36 +404,47 @@ class FrameTVArtCard extends HTMLElement {
       }
       this._lastStateHash = '';
       if (this._hass) this._render();
-    } else if (this._overridePanelOpen) {
-      if (uploadJustFinished) {
-        this._slideshowReverting = false;
-        if (mode === 'override') {
-          // Override upload completed: override_paths are confirmed by server.
-          this._slideshowPostClear = false;
-          this._slideshowClearRefreshPending = false;
-          if (this._slideshowOverridePaths.length) {
-            this._slideshowSelected = new Set(this._slideshowOverridePaths);
-          }
-        } else if (this._slideshowClearRefreshPending) {
-          // Full collections/refresh triggered by Clear Override has completed.
-          // current_paths is now fresh and authoritative — seed the grid from it.
-          this._slideshowClearRefreshPending = false;
-          this._slideshowPostClear = false;
-          this._slideshowSelected = new Set(this._slideshowCurrentPaths);
-        } else {
-          // Background auto cycle: current_paths is still unreliable. Keep grid empty.
-          this._slideshowPostClear = true;
-          this._slideshowSelected = new Set();
-        }
-        if (this._hass) {
-          this._hass.callService('mqtt', 'publish', {
-            topic: 'frame_tv/cmd/slideshow/available/request',
-            payload: JSON.stringify({ req_id: Date.now() }),
-            qos: 1, retain: false,
-          }).catch(() => {});
-        }
+    } else {
+      // Mode unchanged. If override, resync selection from server-authoritative override_paths
+      // (handles server-side pruning of deleted files from override state).
+      if (mode === 'override' && !this._slideshowUploading && !this._slideshowPostClear
+          && this._slideshowOverridePaths.length) {
+        this._slideshowSelected = new Set(this._slideshowOverridePaths);
       }
-      this._renderOverrideGrid();
+      if (this._overridePanelOpen) {
+        if (uploadJustFinished) {
+          this._slideshowReverting = false;
+          if (mode === 'override') {
+            // Override upload completed: override_paths are confirmed by server.
+            this._slideshowPostClear = false;
+            this._slideshowClearRefreshPending = false;
+            if (this._slideshowOverridePaths.length) {
+              this._slideshowSelected = new Set(this._slideshowOverridePaths);
+            }
+          } else if (this._slideshowClearRefreshPending) {
+            // Full collections/refresh triggered by Clear Override has completed.
+            // current_paths is now fresh and authoritative — seed the grid from it.
+            this._slideshowClearRefreshPending = false;
+            this._slideshowPostClear = false;
+            this._slideshowSelected = new Set(this._slideshowCurrentPaths);
+          } else {
+            // Background auto cycle: current_paths is still unreliable. Keep grid empty.
+            this._slideshowPostClear = true;
+            this._slideshowSelected = new Set();
+          }
+          if (this._hass) {
+            this._hass.callService('mqtt', 'publish', {
+              topic: 'frame_tv/cmd/slideshow/available/request',
+              payload: JSON.stringify({ req_id: Date.now() }),
+              qos: 1, retain: false,
+            }).catch(() => {});
+          }
+        }
+        this._renderOverrideGrid();
+      } else if (mode === 'override') {
+        // Panel is closed but selection was resynced — update counter badge in place
+        this._updateOverrideCounter();
+      }
     }
   }
 
