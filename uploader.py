@@ -1591,6 +1591,12 @@ class monitor_and_display:
                     client.subscribe(f"{self.mqtt_cmd_prefix}/#", qos=1)
                 except Exception:
                     pass
+                # Republish retained state so broker always has fresh data after reconnect
+                try:
+                    self._publish_collections_state()
+                    self._publish_settings_state()
+                except Exception:
+                    pass
             else:
                 self.log.warning('MQTT connect failed (rc=%s)', str(rc_val))
         except Exception:
@@ -1827,7 +1833,10 @@ class monitor_and_display:
             return
         try:
             opts = []
-            if self.collections_from_csv and self._csv_headers and 'artist_name' in self._csv_headers and 'artwork_dir' in self._csv_headers:
+            has_label_col = self._csv_headers and (
+                'artist_name' in self._csv_headers or 'collection_name' in self._csv_headers
+            )
+            if self.collections_from_csv and has_label_col and self._csv_headers and 'artwork_dir' in self._csv_headers:
                 try:
                     # Build collection label options; prefer collection_name over artist_name when present
                     pairs = set()
@@ -1836,18 +1845,32 @@ class monitor_and_display:
                         cn = (row.get('collection_name') or '').strip()
                         dn = (row.get('artwork_dir') or '').strip()
                         label = cn if cn else an
-                        if label and dn and os.path.isdir(os.path.join(self.media_root, dn)):
+                        if label and dn:
+                            if not os.path.isdir(os.path.join(self.media_root, dn)):
+                                self.log.debug(
+                                    'Collections label "%s": artwork_dir "%s" not found under media_root; '
+                                    'including in options anyway (dir may not be synced yet)', label, dn
+                                )
                             pairs.add(label.replace('_', ' '))
                     opts = sorted(pairs)
                     if not opts:
                         # Fallback to folders if CSV produced nothing usable
+                        self.log.info(
+                            'No usable labels found in CSV (rows=%d, headers=%s); falling back to folder scan',
+                            len(self._csv_by_file), self._csv_headers
+                        )
                         opts = self._scan_collections()
                     else:
-                        self.log.info('Publishing %d collections from CSV (labels), mapped to artwork_dir folders', len(opts))
+                        self.log.info('Publishing %d collections from CSV (labels): %s', len(opts), opts)
                 except Exception as e:
-                    self.log.warning('Failed to derive artist_name options from CSV; falling back to folders: %s', e)
+                    self.log.warning('Failed to derive collection label options from CSV; falling back to folders: %s', e)
                     opts = self._scan_collections()
             else:
+                if self.collections_from_csv and self._csv_headers:
+                    self.log.info(
+                        'collections_from_csv enabled but CSV has no artist_name or collection_name column '
+                        '(headers: %s); falling back to folder scan', self._csv_headers
+                    )
                 opts = self._scan_collections()
             # State: human-friendly count
             try:

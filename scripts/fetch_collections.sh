@@ -38,12 +38,12 @@ if [ -n "${GITHUB_TOKEN:-}" ] && [ ${#GITHUB_TOKEN} -gt 10 ]; then
     done
     printf "%s" "$out"
   }
-  GIT_CLONE() { git -c credential.helper= clone --depth 1 "$@"; }
-  GIT_FETCH() { git -c credential.helper= fetch --depth=1 "$@"; }
+  GIT_CLONE() { git -c credential.helper= -c http.sslVersion=tlsv1.2 clone --depth 1 "$@"; }
+  GIT_FETCH() { git -c credential.helper= -c http.sslVersion=tlsv1.2 fetch --depth=1 "$@"; }
 else
   echo "fetch_collections.sh: No GitHub token detected; attempting unauthenticated clones"
-  GIT_CLONE() { git clone --depth 1 "$@"; }
-  GIT_FETCH() { git fetch --depth=1 "$@"; }
+  GIT_CLONE() { git -c http.sslVersion=tlsv1.2 clone --depth 1 "$@"; }
+  GIT_FETCH() { git -c http.sslVersion=tlsv1.2 fetch --depth=1 "$@"; }
 fi
 
 if [ -z "$COL_LIST" ] && [ -f "$LIST_FILE" ]; then
