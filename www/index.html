@@ -370,6 +370,7 @@
       client = mqtt.connect(broker, { username, password });
       client.on('connect', () => {
         client.subscribe([TOPIC_ATTR, TOPIC_STATE, TOPIC_COLL_ATTR, TOPIC_SELECTED, TOPIC_SETTINGS_ATTR, TOPIC_SLIDESHOW_STATE, TOPIC_SLIDESHOW_ATTR, TOPIC_SLIDESHOW_AVAIL, `${TOPIC_ACK_PREFIX}/#`]);
+        requestSlideshowAvailable();
       });
       client.on('message', (topic, payload) => {
         try {
@@ -398,6 +399,7 @@
             try {
               const d = JSON.parse(payload.toString() || '{}');
               slideshowAvailable = d.images || [];
+              preloadThumbnails(slideshowAvailable);
               // If override is active and selection was never seeded, seed it now
               if (slideshowMode === 'override' && slideshowSelected.size === 0 && slideshowOverridePaths.length) {
                 slideshowSelected = new Set(slideshowOverridePaths);
@@ -786,7 +788,13 @@
       $viewSlideshow.style.display = tabKey === 'slideshow' ? '' : 'none';
       $tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === tabKey));
     }
-    $tabs.forEach(t => t.addEventListener('click', () => show(t.dataset.tab)));
+    $tabs.forEach(t => t.addEventListener('click', () => {
+      show(t.dataset.tab);
+      if (t.dataset.tab === 'slideshow') {
+        requestSlideshowAvailable();
+        renderSlideshowGrid();
+      }
+    }));
     show('nowplaying');
 
     // --- Settings: Manage uploader env overrides ---
@@ -1013,7 +1021,6 @@
         if ($slInterval && !$slInterval.dataset.dirty) $slInterval.value = slIntervalBaseline;
         if ($slMaxUploads && !$slMaxUploads.dataset.dirty) $slMaxUploads.value = slideshowMaxUploads;
         markSlSettingsDirty();
-        updateSlCounter();
         updateGridLock();
       } catch (_) {}
     }
@@ -1063,8 +1070,26 @@
       if ($slOReset) $slOReset.style.display = selectionMatchesBaseline() ? 'none' : '';
     }
 
+    function preloadThumbnails(images) {
+      if (!images || !images.length) return;
+      const base = `${location.origin}/app/frame_tv_art_collections`;
+      const urls = images.map(img =>
+        `${base}/${encodeURIComponent(img.folder)}/${encodeURIComponent(img.file)}`
+      );
+      const CONCURRENCY = 6;
+      let idx = 0;
+      const next = () => {
+        if (idx >= urls.length) return;
+        const el = new Image();
+        el.onload = el.onerror = next;
+        el.src = urls[idx++];
+      };
+      for (let i = 0; i < Math.min(CONCURRENCY, urls.length); i++) next();
+    }
+
     function renderSlideshowGrid() {
       if (!$slGrid) return;
+      updateSlCounter();
       if (!slideshowAvailable.length) {
         $slGrid.innerHTML = '';
         if ($slGridHint) $slGridHint.textContent = 'No images found. Make sure collections are selected above.';
@@ -1078,7 +1103,7 @@
         const isDisabled = !isSelected && atMax;
         const thumbUrl = `${location.origin}/app/frame_tv_art_collections/${encodeURIComponent(img.folder)}/${encodeURIComponent(img.file)}`;
         return `<div class="sl-thumb${isSelected ? ' selected' : ''}${isDisabled ? ' disabled' : ''}" data-path="${escapeHtml(img.path)}">
-          <img src="${thumbUrl}" loading="lazy" alt="${escapeHtml(img.title || img.file)}" onerror="this.style.display='none'">
+          <img src="${thumbUrl}" loading="eager" alt="${escapeHtml(img.title || img.file)}" onerror="this.style.display='none'">
           <div class="sl-thumb-check">${isSelected ? '\u2713' : ''}</div>
         </div>`;
       }
@@ -1106,7 +1131,7 @@
         html += sectionHtml(`Selected (${selected.length})`, selected, true);
       }
       for (const [artist, images] of Object.entries(byArtist).sort(([a],[b]) => a.localeCompare(b))) {
-        html += sectionHtml(artist, images, false);
+        html += sectionHtml(artist, images, true);
       }
       $slGrid.innerHTML = html;
 

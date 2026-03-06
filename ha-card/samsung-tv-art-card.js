@@ -101,6 +101,25 @@ class FrameTVArtCard extends HTMLElement {
     return this._config.image_path || '';
   }
 
+  _preloadThumbnails(images) {
+    if (!images || !images.length) return;
+    const basePath = this._getBaseImagePath();
+    const urls = images.map(img =>
+      `${basePath}/${encodeURIComponent(img.folder)}/${encodeURIComponent(img.file)}`
+    );
+    // Load up to 6 concurrently to warm the browser cache without flooding
+    const CONCURRENCY = 6;
+    let idx = 0;
+    const next = () => {
+      if (idx >= urls.length) return;
+      const url = urls[idx++];
+      const img = new Image();
+      img.onload = img.onerror = next;
+      img.src = url;
+    };
+    for (let i = 0; i < Math.min(CONCURRENCY, urls.length); i++) next();
+  }
+
   set hass(hass) {
     this._hass = hass;
     this._ensureRefreshSubscriptions();
@@ -421,6 +440,7 @@ class FrameTVArtCard extends HTMLElement {
   _handleSlideshowAvailableMessage(message) {
     const payload = this._parseJsonPayload(message);
     this._slideshowAvailable = (payload && Array.isArray(payload.images)) ? payload.images : [];
+    this._preloadThumbnails(this._slideshowAvailable);
     if (this._overridePanelOpen) this._renderOverrideGrid();
   }
 
@@ -1725,7 +1745,7 @@ class FrameTVArtCard extends HTMLElement {
       html += `<div class="ftv-op-section">Selected (${selectedImgs.length})</div>`;
       for (const img of selectedImgs) {
         const url = `${basePath}/${encodeURIComponent(img.folder)}/${encodeURIComponent(img.file)}`;
-        html += `<div class="ftv-op-thumb selected${locked ? ' disabled' : ''}" data-path="${this._escapeHtml(img.path)}"><img src="${url}" loading="lazy" alt="" onerror="this.style.display='none'"><div class="ftv-op-check">&#10003;</div></div>`;
+        html += `<div class="ftv-op-thumb selected${locked ? ' disabled' : ''}" data-path="${this._escapeHtml(img.path)}"><img src="${url}" loading="eager" alt="" onerror="this.style.display='none'"><div class="ftv-op-check">&#10003;</div></div>`;
       }
     }
     // Remaining grouped by artist
@@ -1734,7 +1754,7 @@ class FrameTVArtCard extends HTMLElement {
       for (const img of images) {
         const url = `${basePath}/${encodeURIComponent(img.folder)}/${encodeURIComponent(img.file)}`;
         const isDisabled = atMax || locked;
-        html += `<div class="ftv-op-thumb${isDisabled ? ' disabled' : ''}" data-path="${this._escapeHtml(img.path)}"><img src="${url}" loading="lazy" alt="" onerror="this.style.display='none'"><div class="ftv-op-check"></div></div>`;
+        html += `<div class="ftv-op-thumb${isDisabled ? ' disabled' : ''}" data-path="${this._escapeHtml(img.path)}"><img src="${url}" loading="eager" alt="" onerror="this.style.display='none'"><div class="ftv-op-check"></div></div>`;
       }
     }
     grid.innerHTML = html;
