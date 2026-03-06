@@ -96,3 +96,25 @@ for src in $(echo "$COL_LIST" | sed 's/,/ /g'); do
 done
 
 echo "Collection fetch complete."
+
+# Prune directories that were previously cloned but are no longer in the list.
+# Only removes subdirectories that contain a .git folder (i.e. were managed by
+# this script). Manually placed or baked-in directories without .git are kept.
+expected_names=""
+for src in $(echo "$COL_LIST" | sed 's/,/ /g'); do
+  repo="${src%%#*}"
+  expected_names="$expected_names $(basename "$repo" .git)"
+done
+
+for d in "$COL_DIR"/*/; do
+  [ -d "$d/.git" ] || continue
+  dname=$(basename "$d")
+  found=0
+  for n in $expected_names; do
+    [ "$n" = "$dname" ] && found=1 && break
+  done
+  if [ $found -eq 0 ]; then
+    echo "Pruning removed collection: $dname"
+    rm -rf "$d"
+  fi
+done
