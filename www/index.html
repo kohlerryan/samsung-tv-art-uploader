@@ -371,6 +371,7 @@
       client.on('connect', () => {
         client.subscribe([TOPIC_ATTR, TOPIC_STATE, TOPIC_COLL_ATTR, TOPIC_SELECTED, TOPIC_SETTINGS_ATTR, TOPIC_SLIDESHOW_STATE, TOPIC_SLIDESHOW_ATTR, TOPIC_SLIDESHOW_AVAIL, `${TOPIC_ACK_PREFIX}/#`]);
         requestSlideshowAvailable();
+        scheduleAvailableRetry();
       });
       client.on('message', (topic, payload) => {
         try {
@@ -399,6 +400,7 @@
               const d = JSON.parse(payload.toString() || '{}');
               slideshowAvailable = d.images || [];
               preloadThumbnails(slideshowAvailable);
+              if (_availRetryTimer) { clearTimeout(_availRetryTimer); _availRetryTimer = null; } // stop retrying
               // If override is active and selection was never seeded, seed it now
               if (slideshowMode === 'override' && slideshowSelected.size === 0 && slideshowOverridePaths.length) {
                 slideshowSelected = new Set(slideshowOverridePaths);
@@ -910,6 +912,16 @@
     function requestSlideshowAvailable() {
       if (client) client.publish(`${TOPIC_CMD_PREFIX}/slideshow/available/request`, JSON.stringify({ req_id: Date.now() }), { qos: 1 });
     }
+    let _availRetryTimer = null;
+    function scheduleAvailableRetry() {
+      if (_availRetryTimer) return; // already scheduled
+      _availRetryTimer = setTimeout(function retry() {
+        _availRetryTimer = null;
+        if (slideshowAvailable.length) return; // arrived — stop
+        requestSlideshowAvailable();
+        _availRetryTimer = setTimeout(retry, 5000);
+      }, 5000);
+    }
 
     const $slCounter   = document.getElementById('sl-counter');
     const $slOApply    = document.getElementById('sl-override-apply');
@@ -1002,6 +1014,11 @@
             slideshowPostClear = true;
             slideshowSelected = new Set();
           }
+        } else if (isOverride && !slideshowUploading && !slideshowPostClear
+            && slideshowOverridePaths.length) {
+          // Mode unchanged, override active: resync from server-authoritative override_paths
+          // (handles server-side pruning of deleted files from override state).
+          slideshowSelected = new Set(slideshowOverridePaths);
         } else if (!slideshowReverting && !slideshowPostClear && slideshowSelected.size === 0) {
           // Initial load or settled state: seed from appropriate paths.
           slideshowSelected = new Set(
@@ -1012,6 +1029,9 @@
         }
         requestSlideshowAvailable();
         if (slideshowAvailable.length) renderSlideshowGrid();
+        updateSlCounter();
+        // Retry available request until thumbnails arrive (container may still be starting up)
+        if (!slideshowAvailable.length) scheduleAvailableRetry();
         // Pre-fill settings inputs if not dirty
         slSeqBaseline = !!(data.sequential);
         slIntervalBaseline = parseInt(data.update_minutes || 0, 10);
