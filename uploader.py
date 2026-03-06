@@ -1591,6 +1591,12 @@ class monitor_and_display:
                     client.subscribe(f"{self.mqtt_cmd_prefix}/#", qos=1)
                 except Exception:
                     pass
+                # Republish retained state so broker always has fresh data after reconnect
+                try:
+                    self._publish_collections_state()
+                    self._publish_settings_state()
+                except Exception:
+                    pass
             else:
                 self.log.warning('MQTT connect failed (rc=%s)', str(rc_val))
         except Exception:
@@ -1843,7 +1849,7 @@ class monitor_and_display:
                         # Fallback to folders if CSV produced nothing usable
                         opts = self._scan_collections()
                     else:
-                        self.log.info('Publishing %d collections from CSV (labels), mapped to artwork_dir folders', len(opts))
+                        self.log.info('Publishing %d collections from CSV (labels): %s', len(opts), opts)
                 except Exception as e:
                     self.log.warning('Failed to derive artist_name options from CSV; falling back to folders: %s', e)
                     opts = self._scan_collections()

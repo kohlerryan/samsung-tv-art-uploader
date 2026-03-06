@@ -154,7 +154,7 @@
       </div>
       <div class="tabcontent">
         <div id="viewControl">
-          <h1 style="display:flex;justify-content:space-between;align-items:baseline;">Frame TV Art <span style="font-size:11px;font-weight:400;color:#7a7575;">v0.1.4-beta.2</span></h1>
+          <h1 style="display:flex;justify-content:space-between;align-items:baseline;">Frame TV Art <span style="font-size:11px;font-weight:400;color:#7a7575;">v0.1.4-beta.3</span></h1>
           <div class="row">
             <div class="ftv-controls" style="flex:1;">
               <div class="ftv-row">
@@ -246,6 +246,7 @@
         try {
           if (topic === TOPIC_COLL_ATTR) {
             const data = JSON.parse(payload.toString() || '{}');
+            console.log('[collections] received:', JSON.stringify(data));
             options = (data.options || []).filter(o => o !== '@eaDir');
             if (!staged.length) staged = baseline.slice();
             renderOptions();
