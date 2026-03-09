@@ -331,7 +331,7 @@ class monitor_and_display:
         self._csv_headers = []
         self._csv_by_file = {}
         # Collections source (folders by default; optional unique artists from CSV)
-        self.collections_from_csv = os.environ.get('SAMSUNG_TV_ART_COLLECTIONS_FROM_CSV', 'false').lower() in ['1','true','yes']
+        self.collections_from_csv = os.environ.get('SAMSUNG_TV_ART_COLLECTIONS_FROM_CSV', 'true').lower() in ['1','true','yes']
         # CSV change detection (polling)
         self.csv_check_interval = int(os.environ.get('SAMSUNG_TV_ART_CSV_CHECK_SECONDS', '60'))
         self._csv_last_check = 0

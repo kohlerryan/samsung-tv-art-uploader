@@ -8,7 +8,7 @@ Built on top of [NickWaterton/samsung-tv-ws-api](https://github.com/NickWaterton
 
 | Home Assistant Card | Web UI |
 |---|---|
-| ![HA Card](assets/hacard.png) | ![Web UI](assets/webui.png) |
+| ![HA Card](ha-card/images/hacard.png) | ![Web UI](assets/webui.png) |
 
 ## Features
 
@@ -271,6 +271,7 @@ Key variables:
 | `SAMSUNG_TV_ART_COLLECTIONS` | — | Space- or comma-separated git repo URLs (for many repos, use `data/collections.list` instead) |
 | `SAMSUNG_TV_ART_GITHUB_TOKEN` | — | GitHub PAT for private repos |
 | `SAMSUNG_TV_ART_FETCH_ON_START` | `false` | Fetch collections on container start |
+| `SAMSUNG_TV_ART_COLLECTIONS_FROM_CSV` | `true` | Use `artwork_data.csv` inside each collection folder to show friendly artist/collection names in the UI dropdown. Set to `false` to show raw folder names instead |
 | `SAMSUNG_TV_ART_LOCAL_WEB` | `false` | Enable the web UI on port 8080 |
 | `SAMSUNG_TV_ART_MDNS_ENABLE` | `true` | Advertise via mDNS as `<hostname>.local` — requires host, macvlan, or macvlan+bridge networking |
 
@@ -296,7 +297,7 @@ See [`ha-card/README.md`](ha-card/README.md) for installation steps and [`exampl
 
 | Card — Collections & Control | Card — Settings |
 |---|---|
-| ![HA Card Control](assets/hacard_control.png) | ![HA Card Settings](assets/hacard_settings.png) |
+| ![HA Card Control](ha-card/images/hacard_control.png) | ![HA Card Settings](ha-card/images/hacard_settings.png) |
 
 ### Mixed-content / image URLs
 
@@ -349,15 +350,16 @@ samsung-tv-art/
 ├── serve.py               — minimal HTTP server for the web UI
 ├── assets/
 │   ├── standby.png        — default standby artwork baked into the image
-│   ├── hacard.png         — HA card screenshot
-│   ├── hacard_control.png — HA card collections/control panel screenshot
-│   ├── hacard_settings.png— HA card settings panel screenshot
 │   ├── webui.png          — web UI screenshot
 │   ├── webui_control.png  — web UI collections/control panel screenshot
 │   └── webui_settings.png — web UI settings panel screenshot
 ├── ha-card/
 │   ├── samsung-tv-art-card.js   — Home Assistant Lovelace card
-│   └── README.md
+│   ├── README.md
+│   └── images/
+│       ├── hacard.png         — HA card screenshot
+│       ├── hacard_control.png — HA card collections/control panel screenshot
+│       └── hacard_settings.png— HA card settings panel screenshot
 ├── scripts/
 │   ├── fetch_collections.sh     — git clone/pull collection repos at runtime
 │   ├── aggregate_csv.py         — merges per-collection CSVs into a single artwork_data.csv
