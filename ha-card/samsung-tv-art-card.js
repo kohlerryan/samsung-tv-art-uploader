@@ -90,6 +90,7 @@ class FrameTVArtCard extends HTMLElement {
       // Single base path for images served by Home Assistant (/local maps to /config/www)
       image_path: config.image_path || '/local/images/frame_tv_art_collections',
       standby_image_path: config.standby_image_path,
+      preload_thumbnails: false,
       ...config
     };
     // don't eagerly build standby path here; compute based on protocol when needed
@@ -152,7 +153,9 @@ class FrameTVArtCard extends HTMLElement {
     const ackMessage = (this._refreshAck && this._refreshAck.message) || '';
     const ackReqId = (this._refreshAck && this._refreshAck.req_id) || '';
     const syncStatus = (this._syncAck && this._syncAck.status) || '';
-    return `${file}|${selected}|${options}|${ackStatus}|${ackMessage}|${ackReqId}|${syncStatus}|${this._refreshInProgress}|${this._slideshowMode}|${this._overridePanelOpen}|${this._slideshowSeq}|${this._slideshowUpdateMins}|${this._slideshowMaxUploads}|${this._slideshowUploading}`;
+    const artAttrs = this._getAttrs(this._config.selected_artwork_file_entity);
+    const inArtMode = artAttrs ? String(artAttrs.in_art_mode) : 'true';
+    return `${file}|${selected}|${options}|${ackStatus}|${ackMessage}|${ackReqId}|${syncStatus}|${this._refreshInProgress}|${this._slideshowMode}|${this._overridePanelOpen}|${this._slideshowSeq}|${this._slideshowUpdateMins}|${this._slideshowMaxUploads}|${this._slideshowUploading}|${inArtMode}`;
   }
 
   disconnectedCallback() {
@@ -473,7 +476,7 @@ class FrameTVArtCard extends HTMLElement {
   _handleSlideshowAvailableMessage(message) {
     const payload = this._parseJsonPayload(message);
     this._slideshowAvailable = (payload && Array.isArray(payload.images)) ? payload.images : [];
-    this._preloadThumbnails(this._slideshowAvailable);
+    if (this._config.preload_thumbnails) this._preloadThumbnails(this._slideshowAvailable);
     if (this._overridePanelOpen) this._renderOverrideGrid();
   }
 
@@ -665,7 +668,9 @@ class FrameTVArtCard extends HTMLElement {
       const normalizedFile = String(file || '').trim().toLowerCase();
       const standbyLike = isStandby || !normalizedFile || normalizedFile === 'unknown' || normalizedFile === 'unavailable' || normalizedFile === 'none';
       
-      if (standbyLike) {
+      if (isStandby && attrs && attrs.in_art_mode === false) {
+        artworkText = 'TV is not in art mode';
+      } else if (standbyLike) {
         artworkText = 'Please stand by as artwork is loaded...';
       } else {
         // Prefer MQTT attributes if provided by the sensor
@@ -740,7 +745,7 @@ class FrameTVArtCard extends HTMLElement {
       const normalizedFile = String(file || '').trim().toLowerCase();
       const standbyLike = isStandby || !normalizedFile || normalizedFile === 'unknown' || normalizedFile === 'unavailable' || normalizedFile === 'none';
       const artworkText = standbyLike 
-        ? 'Please stand by as artwork is loaded...'
+        ? (attrs && attrs.in_art_mode === false ? 'TV is not in art mode' : 'Please stand by as artwork is loaded...')
         : `
         ${fArtist ? `<div style=\"line-height:1.3; margin-top: 2px;\"><span style=\"font-size:1.1em; font-weight:bold; color: white;\">${this._formatInline(fArtist)}</span></div>` : ''}
             <div style=\"line-height:1.3; margin-top: 8px;\"><em style=\"font-size:1.1em; color: white;\">${this._formatInline(fTitle)}</em>${fYear ? `<span style=\"font-size:0.9em; color: rgba(255,255,255,0.7);\">, ${fYear}</span>` : ''}</div>
@@ -835,6 +840,10 @@ class FrameTVArtCard extends HTMLElement {
     if (!this._hass) return;
     const { file } = this._getSelectedData();
     const normalizedFile = String(file || '').trim().toLowerCase();
+    // in_art_mode is published by the uploader (false when TV leaves art mode).
+    // Fall back to true when the attribute is absent (older uploader versions).
+    const artworkAttrs = this._getAttrs(this._config.selected_artwork_file_entity);
+    const inArtMode = artworkAttrs && artworkAttrs.in_art_mode !== undefined ? artworkAttrs.in_art_mode !== false : true;
     const selectedCollections = this._baselineSelected || this._getSelectedCollections();
     const options = this._getOptions(this._config.collections_entity).filter(opt => opt !== '@eaDir');
     const selectedOptions = options.filter(opt => selectedCollections.includes(opt)).sort();
@@ -844,7 +853,9 @@ class FrameTVArtCard extends HTMLElement {
     // While a refresh is in progress, force standby display regardless of HA state
     const standbyBgUrl = this._config.standby_image_path || `${this._getBaseImagePath()}/standby.png`;
     const bgUrl = this._refreshInProgress ? standbyBgUrl : this._getBackgroundUrl();
-    const isStandby = this._refreshInProgress || !normalizedFile || normalizedFile === 'standby.png' || normalizedFile === 'unknown' || normalizedFile === 'unavailable' || normalizedFile === 'none';
+    const isNotInArtMode = !inArtMode;
+    const isStandby = isNotInArtMode || this._refreshInProgress || !normalizedFile || normalizedFile === 'standby.png' || normalizedFile === 'unknown' || normalizedFile === 'unavailable' || normalizedFile === 'none';
+    this._isStandbyLike = isStandby;
     const hasArtwork = bgUrl !== null;
 
     // Initialize staged selection to baseline on render
@@ -883,7 +894,7 @@ class FrameTVArtCard extends HTMLElement {
             padding: 12px;
             position: relative;
             border-radius: var(--ha-card-border-radius, 12px);
-            ${hasArtwork ? `background: linear-gradient(rgba(0,0,0,0.1), rgba(0,0,0,0.1)), url("${bgUrl}"); background-size: cover; background-position: center;` : ''}
+            ${isNotInArtMode ? '' : hasArtwork ? `background: linear-gradient(rgba(0,0,0,0.1), rgba(0,0,0,0.1)), url("${bgUrl}"); background-size: cover; background-position: center;` : ''}
           }
           .ftv-header {
             display: flex;
@@ -926,9 +937,11 @@ class FrameTVArtCard extends HTMLElement {
           .ftv-label { font-size: 0.85em; color: rgba(255,255,255,0.7); }
           .ftv-input { padding: 8px; border: 1px solid #555; background: #222; color: #fff; border-radius: 6px; }
           .ftv-settings .actions { display: flex; flex-direction: row; gap: 8px; }
-          .ftv-btn { padding: 10px 12px; border: none; border-radius: 6px; cursor: pointer; width: auto; box-sizing: border-box; flex: 1 1 50%; }
+          .ftv-btn { padding: 10px 12px; border: none; border-radius: 6px; cursor: pointer; width: auto; box-sizing: border-box; flex: 1 1 50%; transition: filter 0.15s; }
           .ftv-btn.primary { background: #2f7fbf; color: #fff; }
           .ftv-btn.ghost { background: transparent; color: #fff; border: 1px solid #555; }
+          .ftv-btn:not([disabled]):hover { filter: brightness(1.15); }
+          .ftv-btn[disabled], .ftv-btn:disabled { opacity: 0.5; cursor: default; }
           .ftv-icon-wrap {
             width: 42px;
             height: 42px;
@@ -1400,6 +1413,18 @@ class FrameTVArtCard extends HTMLElement {
         if (inMqttPort) inMqttPort.value = envBaseline.SAMSUNG_TV_ART_MQTT_PORT;
         if (inMqttUser) inMqttUser.value = envBaseline.SAMSUNG_TV_ART_MQTT_USERNAME;
         envDirty();
+        // Disable action buttons when TV is not in Art Mode
+        const tvBlocked = !!this._isStandbyLike;
+        if (btnRestartEnv) btnRestartEnv.disabled = tvBlocked;
+        if (btnSyncCollections) btnSyncCollections.disabled = tvBlocked;
+        if (tvBlocked && btnApplyEnv) btnApplyEnv.disabled = true;
+        if (btnRefresh) btnRefresh.disabled = tvBlocked;
+        const btnApply = this.querySelector('#ftv-apply');
+        if (tvBlocked && btnApply) btnApply.disabled = true;
+        if (envMsg) {
+          if (tvBlocked) envMsg.textContent = 'TV is not in Art Mode — buttons unavailable.';
+          else if (envMsg.textContent === 'TV is not in Art Mode — buttons unavailable.') envMsg.textContent = '';
+        }
       } catch (_) {}
     };
     // Grid (override) button — toggle the override popup
@@ -1450,6 +1475,8 @@ class FrameTVArtCard extends HTMLElement {
         if (_pop) _pop.classList.toggle('open', this._overridePanelOpen);
         gridBtn.classList.toggle('active', this._overridePanelOpen);
         if (this._overridePanelOpen) {
+          // Close settings panel when slideshow opens
+          if (panel) panel.classList.remove('open');
           // Request a fresh available list so grid populates
           if (this._hass) {
             this._hass.callService('mqtt', 'publish', {
@@ -1550,7 +1577,18 @@ class FrameTVArtCard extends HTMLElement {
       gear.addEventListener('click', (e) => {
         e.stopPropagation();
         panel.classList.toggle('open');
-        if (panel.classList.contains('open')) loadEnv();
+        if (panel.classList.contains('open')) {
+          loadEnv();
+          // Close the override/slideshow popup when settings opens
+          const overridePopup = this.querySelector('#ftv-override-popup');
+          const gridBtnEl = this.querySelector('#ftv-grid-btn');
+          if (this._overridePanelOpen) {
+            this._overridePanelOpen = false;
+            if (overridePopup) overridePopup.classList.remove('open');
+            if (gridBtnEl) gridBtnEl.classList.remove('active');
+            this._lastStateHash = this._getStateHash();
+          }
+        }
       });
       // Remove previous document-level listener before registering a new one
       if (this._docClickHandler) {
@@ -1583,6 +1621,7 @@ class FrameTVArtCard extends HTMLElement {
     if (inMqttPass) inMqttPass.addEventListener('input', envDirty);
     if (btnApplyEnv) btnApplyEnv.addEventListener('click', async (e) => {
       e.stopPropagation();
+      if (this._isStandbyLike) return;
       try {
         const payload = {
           SAMSUNG_TV_ART_TV_IP: String(inIp?.value||'').trim(),
@@ -1605,18 +1644,21 @@ class FrameTVArtCard extends HTMLElement {
 
     if (btnRestartEnv) btnRestartEnv.addEventListener('click', (e) => {
       e.stopPropagation();
+      if (this._isStandbyLike) return;
       try {
         if (this._hass) {
           this._hass.callService('mqtt', 'publish', { topic: 'frame_tv/cmd/settings/restart', payload: JSON.stringify({ req_id: Date.now() }), qos: 1, retain: false });
         }
         if (envMsg) envMsg.textContent = 'Restarting uploader...';
+        btnRestartEnv.textContent = 'Restarting…';
         btnRestartEnv.disabled = true;
-        setTimeout(() => { btnRestartEnv.disabled = false; if (envMsg && envMsg.textContent==='Restarting uploader...') envMsg.textContent=''; }, 6000);
+        setTimeout(() => { btnRestartEnv.textContent = 'Restart Uploader'; btnRestartEnv.disabled = false; if (envMsg && envMsg.textContent==='Restarting uploader...') envMsg.textContent=''; }, 6000);
       } catch (_) {}
     });
 
     if (btnSyncCollections) btnSyncCollections.addEventListener('click', async (e) => {
       e.stopPropagation();
+      if (this._isStandbyLike) return;
       try {
         const reqId = Date.now();
         this._lastRefreshReqId = reqId;
@@ -1630,8 +1672,9 @@ class FrameTVArtCard extends HTMLElement {
         if (this._hass) {
           await this._hass.callService('mqtt', 'publish', { topic: 'frame_tv/cmd/settings/sync_collections', payload: JSON.stringify({ req_id: reqId }), qos: 1, retain: false });
         }
+        btnSyncCollections.textContent = 'Updating…';
         btnSyncCollections.disabled = true;
-        setTimeout(() => { btnSyncCollections.disabled = false; }, 6000);
+        setTimeout(() => { btnSyncCollections.textContent = 'Update & Refresh'; btnSyncCollections.disabled = false; }, 6000);
       } catch (err) {
         setStatus('Update & refresh failed to send. Check MQTT integration/service.', 8000);
       }
@@ -1718,7 +1761,7 @@ class FrameTVArtCard extends HTMLElement {
         const changed = !this._arraysEqual(this._currentSelected, this._baselineSelected);
         if (applyBtn) {
           applyBtn.style.display = changed ? 'flex' : 'none';
-          applyBtn.disabled = !changed;
+          applyBtn.disabled = !changed || !!this._isStandbyLike;
         }
       });
     });
@@ -1735,7 +1778,7 @@ class FrameTVArtCard extends HTMLElement {
       if (applyBtn) {
         const changed = !this._arraysEqual(this._currentSelected, this._baselineSelected);
         applyBtn.style.display = changed ? 'flex' : 'none';
-        applyBtn.disabled = !changed;
+        applyBtn.disabled = !changed || !!this._isStandbyLike;
       }
       this.querySelectorAll('.ftv-option.selected').forEach(o => o.classList.remove('selected'));
     });
@@ -1745,7 +1788,7 @@ class FrameTVArtCard extends HTMLElement {
     if (applyBtn) {
       const changed = !this._arraysEqual(this._currentSelected, this._baselineSelected);
       applyBtn.style.display = changed ? 'flex' : 'none';
-      applyBtn.disabled = !changed;
+      applyBtn.disabled = !changed || !!this._isStandbyLike;
       applyBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         if (!this._hass) return;
@@ -1791,7 +1834,7 @@ class FrameTVArtCard extends HTMLElement {
       html += `<div class="ftv-op-section">Selected (${selectedImgs.length})</div>`;
       for (const img of selectedImgs) {
         const url = `${basePath}/${encodeURIComponent(img.folder)}/${encodeURIComponent(img.file)}`;
-        html += `<div class="ftv-op-thumb selected${locked ? ' disabled' : ''}" data-path="${this._escapeHtml(img.path)}"><img src="${url}" loading="eager" alt="" onerror="this.style.display='none'"><div class="ftv-op-check">&#10003;</div></div>`;
+        html += `<div class="ftv-op-thumb selected${locked ? ' disabled' : ''}" data-path="${this._escapeHtml(img.path)}"><img src="${url}" loading="${this._config.preload_thumbnails ? 'eager' : 'lazy'}" alt="" onerror="this.style.display='none'"><div class="ftv-op-check">&#10003;</div></div>`;
       }
     }
     // Remaining grouped by artist
@@ -1800,7 +1843,7 @@ class FrameTVArtCard extends HTMLElement {
       for (const img of images) {
         const url = `${basePath}/${encodeURIComponent(img.folder)}/${encodeURIComponent(img.file)}`;
         const isDisabled = atMax || locked;
-        html += `<div class="ftv-op-thumb${isDisabled ? ' disabled' : ''}" data-path="${this._escapeHtml(img.path)}"><img src="${url}" loading="eager" alt="" onerror="this.style.display='none'"><div class="ftv-op-check"></div></div>`;
+        html += `<div class="ftv-op-thumb${isDisabled ? ' disabled' : ''}" data-path="${this._escapeHtml(img.path)}"><img src="${url}" loading="${this._config.preload_thumbnails ? 'eager' : 'lazy'}" alt="" onerror="this.style.display='none'"><div class="ftv-op-check"></div></div>`;
       }
     }
     grid.innerHTML = html;
@@ -1876,7 +1919,7 @@ class FrameTVArtCard extends HTMLElement {
     }
   }
 
-console.info('%c FRAME-TV-ART-CARD %c v0.2.0-beta.2 ', 'color: white; background: #03a9f4; font-weight: bold;', '');
+console.info('%c FRAME-TV-ART-CARD %c v0.2.0-beta.3 ', 'color: white; background: #03a9f4; font-weight: bold;', '');
 
 // Register custom element so Lovelace can use <frame-tv-art-card>
 try {

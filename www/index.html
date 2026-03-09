@@ -250,7 +250,7 @@
         <div class="tab active" data-tab="nowplaying">Now Showing</div>
         <div class="tab" data-tab="slideshow">Slideshow</div>
         <div class="tab" data-tab="settings">Settings</div>
-        <span class="version-tag">v0.2.0-beta.2</span>
+        <span class="version-tag">v0.2.0-beta.3</span>
       </div>
       <div class="tabcontent">
         <div id="viewNowPlaying">
@@ -266,6 +266,12 @@
             <input id="user" placeholder="username (optional)" style="flex:1; padding:10px; background:#2a2623; color:#f2eee9; border:1px solid #4a3d37; border-radius:8px;" />
             <input id="pass" type="password" placeholder="password (optional)" style="flex:1; padding:10px; background:#2a2623; color:#f2eee9; border:1px solid #4a3d37; border-radius:8px;" />
             <button id="connect">Connect</button>
+          </div>
+          <div class="row" style="margin-top:10px; align-items:center;">
+            <label style="display:flex; align-items:center; gap:8px; color:#b6aba4; font-size:13px; cursor:pointer;">
+              <input type="checkbox" id="preload-toggle" style="width:16px; height:16px; cursor:pointer; accent-color:#2f7fbf;">
+              Preload thumbnails (fetch all images on open instead of lazily)
+            </label>
           </div>
         </div>
         <div id="viewSlideshow" style="display:none;">
@@ -366,6 +372,16 @@
       localStorage.setItem('ftv_password', p || '');
     }
 
+    let preloadEnabled = localStorage.getItem('ftv_preload') === 'true';
+    const $preloadToggle = document.getElementById('preload-toggle');
+    if ($preloadToggle) {
+      $preloadToggle.checked = preloadEnabled;
+      $preloadToggle.addEventListener('change', () => {
+        preloadEnabled = $preloadToggle.checked;
+        localStorage.setItem('ftv_preload', String(preloadEnabled));
+      });
+    }
+
     let client = null;
     function connectMqtt(broker, username, password) {
       try { if (client) client.end(true); } catch (_) {}
@@ -404,9 +420,12 @@
               slideshowAvailable = d.images || [];
               preloadThumbnails(slideshowAvailable);
               if (_availRetryTimer) { clearTimeout(_availRetryTimer); _availRetryTimer = null; } // stop retrying
-              // If override is active and selection was never seeded, seed it now
-              if (slideshowMode === 'override' && slideshowSelected.size === 0 && slideshowOverridePaths.length) {
-                slideshowSelected = new Set(slideshowOverridePaths);
+              // Re-seed selection if it is empty and we are not mid-upload.
+              // Covers: override mode never seeded, and auto mode where slideshowPostClear
+              // was set by a background cycle that ran while the tab was not open.
+              if (slideshowSelected.size === 0 && !slideshowUploading) {
+                const paths = slideshowMode === 'override' ? slideshowOverridePaths : slideshowCurrentPaths;
+                if (paths.length) { slideshowSelected = new Set(paths); slideshowPostClear = false; }
               }
               renderSlideshowGrid();
             } catch(_) {}
@@ -503,6 +522,7 @@
     let staged = [];
     let dirty = false;
     let options = [];
+    let tvBlocked = false;
 
     function arraysEqual(a, b) {
       const aa = (a||[]).slice().sort();
@@ -517,8 +537,8 @@
       const showApply = !!dirty;
       const showClear = staged.length > 0;
       if ($apply) {
-        $apply.disabled = !showApply;
-        $apply.style.opacity = showApply ? 1 : 0.6;
+        $apply.disabled = !showApply || tvBlocked;
+        $apply.style.opacity = (showApply && !tvBlocked) ? 1 : 0.6;
         $apply.style.display = showApply ? 'flex' : 'none';
       }
       if ($clear) {
@@ -604,6 +624,7 @@
     let lastAttrs = null;
     let refreshLog = [];
     let _refreshSafetyTimer = null;
+    let _updateSettingsBtnState = null;
 
     function renderRefreshLog() {
       // Cancel the stale-state safety timer — a real ack just arrived
@@ -649,7 +670,7 @@
     function setInfo(attrs) {
       if (refreshInProgress) return;
       // Skip re-render if the display-relevant fields haven't changed
-      const _key = [attrs.file, attrs.artwork_title, attrs.artist_name, attrs.artwork_year].join('|');
+      const _key = [attrs.file, attrs.artwork_title, attrs.artist_name, attrs.artwork_year, attrs.in_art_mode].join('|');
       if (setInfo._lastKey && setInfo._lastKey === _key) return;
       setInfo._lastKey = _key;
       const $np = document.getElementById('viewNowPlaying');
@@ -666,16 +687,25 @@
       const description = (typeof descriptionRaw === 'string') ? descriptionRaw.trim() : '';
       const hasDescription = !!(description && !/^\s*(null|none|n\/a)\s*$/i.test(description) && description !== (file || ''));
       const normalizedFile = String(file || '').trim().toLowerCase();
-      const isStandbyLike = !normalizedFile || normalizedFile === 'standby.png' || normalizedFile === 'unknown' || normalizedFile === 'unavailable' || normalizedFile === 'none';
+      const isNotInArtMode = attrs.in_art_mode === false;
+      const isStandbyLike = isNotInArtMode || !normalizedFile || normalizedFile === 'standby.png' || normalizedFile === 'unknown' || normalizedFile === 'unavailable' || normalizedFile === 'none';
       const isStandby = normalizedFile === 'standby.png';
       slideshowStandby = isStandbyLike;
       updateGridLock();
+      if (_updateSettingsBtnState) _updateSettingsBtnState(isStandbyLike);
 
       let t = '';
-      if (isStandbyLike) {
+      if (isNotInArtMode) {
+        if ($np) $np.classList.add('standby-mode');
+        $bg.style.background = '#3b2012';
+        $bg.innerHTML = '';
+        t = 'TV is not in art mode';
+      } else if (isStandbyLike) {
+        $bg.style.background = '';
         if ($np) $np.classList.add('standby-mode');
         t = 'Please stand by as artwork is loaded...';
       } else {
+        $bg.style.background = '';
         if ($np) $np.classList.remove('standby-mode');
         t = `
           ${artistLine ? `<div style=\"line-height:1.3; margin-top: 2px;\">${artistLine}</div>` : ''}
@@ -688,7 +718,7 @@
       $info.innerHTML = t;
 
       // Build image URL using this host's static server (provided by uploader)
-      if (file && !isStandby) {
+      if (file && !isStandby && !isNotInArtMode) {
         // Prefer explicit artwork_dir from CSV, then collection, then artist_name, then filename heuristic
         const folder = attrs.artwork_dir || attrs.collection || artist || (file.match(/^(.+?)_[^_]+_/)?.[1] || '');
         const url = `${location.origin}/app/frame_tv_art_collections/${encodeURIComponent(folder)}/${encodeURIComponent(file)}`;
@@ -701,7 +731,7 @@
           $bg.innerHTML = `<img src="${standbyUrl}" alt="standby">`;
         };
         img.src = url;
-      } else {
+      } else if (!isNotInArtMode) {
         // No file or standby — show immutable baked standby explicitly
         const standbyUrl = `${location.origin}/app/standby.default.png`;
         $bg.innerHTML = `<img src="${standbyUrl}" alt="standby">`;
@@ -796,6 +826,14 @@
       show(t.dataset.tab);
       if (t.dataset.tab === 'slideshow') {
         requestSlideshowAvailable();
+        // Re-seed selection if nothing is selected (happens after an auto-cycle upload
+        // ran while the tab was not open, which sets slideshowPostClear=true and clears
+        // slideshowSelected).  The user opening the tab is an explicit intent to see
+        // current state, so we favour showing something over an empty grid.
+        if (slideshowSelected.size === 0 && !slideshowUploading) {
+          const paths = slideshowMode === 'override' ? slideshowOverridePaths : slideshowCurrentPaths;
+          if (paths.length) { slideshowSelected = new Set(paths); slideshowPostClear = false; }
+        }
         renderSlideshowGrid();
       }
     }));
@@ -893,8 +931,9 @@
     $restartEnv.onclick = () => {
       client.publish(`${TOPIC_CMD_PREFIX}/settings/restart`, JSON.stringify({ req_id: Date.now() }), { qos: 1, retain: false });
       $envMsg.textContent = 'Restarting uploader...';
+      $restartEnv.textContent = 'Restarting…';
       $restartEnv.disabled = true;
-      setTimeout(() => { $restartEnv.disabled = false; $envMsg.textContent=''; }, 6000);
+      setTimeout(() => { $restartEnv.textContent = 'Restart Uploader'; $restartEnv.disabled = false; $envMsg.textContent=''; }, 6000);
     };
     $syncCollections.onclick = () => {
       const reqId = Date.now();
@@ -904,7 +943,30 @@
       renderRefreshLog();
       const standbyUrl = `${location.origin}/app/standby.default.png`;
       $bg.innerHTML = `<img src="${standbyUrl}" alt="standby">`;
+      $syncCollections.textContent = 'Updating\u2026';
+      $syncCollections.disabled = true;
       client.publish(`${TOPIC_CMD_PREFIX}/settings/sync_collections`, JSON.stringify({ req_id: reqId }), { qos: 1, retain: false });
+      setTimeout(() => { $syncCollections.textContent = 'Update & Refresh'; $syncCollections.disabled = false; }, 8000);
+    };
+    // Expose availability-toggle so setInfo can disable buttons when TV is not in Art Mode
+    _updateSettingsBtnState = function(blocked) {
+      if (blocked) {
+        tvBlocked = true;
+        $applyEnv.disabled = true; $applyEnv.style.opacity = 0.5;
+        $restartEnv.disabled = true; $restartEnv.style.opacity = 0.5;
+        $syncCollections.disabled = true; $syncCollections.style.opacity = 0.5;
+        if ($refresh) { $refresh.disabled = true; $refresh.style.opacity = 0.5; }
+        if ($apply) { $apply.disabled = true; $apply.style.opacity = 0.5; }
+        if ($envMsg) $envMsg.textContent = 'TV is not in Art Mode \u2014 buttons unavailable.';
+      } else {
+        tvBlocked = false;
+        markEnvDirty();
+        $restartEnv.disabled = false; $restartEnv.style.opacity = '';
+        $syncCollections.disabled = false; $syncCollections.style.opacity = '';
+        if ($refresh) { $refresh.disabled = false; $refresh.style.opacity = ''; }
+        updateButtons();
+        if ($envMsg && $envMsg.textContent === 'TV is not in Art Mode \u2014 buttons unavailable.') $envMsg.textContent = '';
+      }
     };
 
     // ── Slideshow tab ──────────────────────────────────────────────────────
@@ -1109,7 +1171,7 @@
     }
 
     function preloadThumbnails(images) {
-      if (!images || !images.length) return;
+      if (!preloadEnabled || !images || !images.length) return;
       const base = `${location.origin}/app/frame_tv_art_collections`;
       const urls = images.map(img =>
         `${base}/${encodeURIComponent(img.folder)}/${encodeURIComponent(img.file)}`
@@ -1141,7 +1203,7 @@
         const isDisabled = !isSelected && atMax;
         const thumbUrl = `${location.origin}/app/frame_tv_art_collections/${encodeURIComponent(img.folder)}/${encodeURIComponent(img.file)}`;
         return `<div class="sl-thumb${isSelected ? ' selected' : ''}${isDisabled ? ' disabled' : ''}" data-path="${escapeHtml(img.path)}">
-          <img src="${thumbUrl}" loading="eager" alt="${escapeHtml(img.title || img.file)}" onerror="this.style.display='none'">
+          <img src="${thumbUrl}" loading="${preloadEnabled ? 'eager' : 'lazy'}" alt="${escapeHtml(img.title || img.file)}" onerror="this.style.display='none'">
           <div class="sl-thumb-check">${isSelected ? '\u2713' : ''}</div>
         </div>`;
       }

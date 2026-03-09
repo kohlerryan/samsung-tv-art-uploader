@@ -368,6 +368,8 @@ class monitor_and_display:
         self._last_state_publish = 0
         self._refresh_in_progress = False
         self._startup_in_progress = False  # True between MQTT init and end of initialize()
+        self._in_art_mode = None           # None = unknown, True/False = last known state
+        self._last_slideshow_paths = set() # path_rel values from the previous seed, used to avoid re-picking the same images
         self._loop = None
         self._collections_sync_running = False
         # Optional mirror directory for Home Assistant media (e.g., bind-mounted /media)
@@ -556,14 +558,27 @@ class monitor_and_display:
             in_artmode = await self.tv.in_artmode()
             # Success - reset failure counter
             self.consecutive_failures = 0
+            if self._in_art_mode is True and not in_artmode:
+                # TV just left art mode — push an unavailable sentinel so UIs disable buttons
+                self._publish_mqtt_state('Unavailable', 'unavailable', None)
+            elif self._in_art_mode is False and in_artmode:
+                # TV just re-entered art mode — force immediate state republish on next cycle
+                self._last_state_publish = 0
+            self._in_art_mode = bool(in_artmode)
             return in_artmode
         except AssertionError:
             self.consecutive_failures += 1
             self.log.warning('TV artmode check failed (empty response, failure %d); treating as off', self.consecutive_failures)
+            if self._in_art_mode is True:
+                self._publish_mqtt_state('Unavailable', 'unavailable', None)
+            self._in_art_mode = False
             return False
         except Exception as e:
             self.consecutive_failures += 1
             self.log.warning('TV artmode check failed (failure %d): %s', self.consecutive_failures, e)
+            if self._in_art_mode is True:
+                self._publish_mqtt_state('Unavailable', 'unavailable', None)
+            self._in_art_mode = False
             return False
 
     def get_backoff_delay(self):
@@ -1131,52 +1146,70 @@ class monitor_and_display:
         '''
         Get files evenly distributed from multiple collections.
         If max_uploads=8 and collections=2, gets 4 from each.
-        Returns list of full paths relative to media_root.
+        Prefers files not seen in the previous slideshow; only supplements with
+        previously-shown images when the fresh pool is too small to fill all slots.
+        Returns list of paths relative to media_root.
         '''
+        last_paths = getattr(self, '_last_slideshow_paths', set())
         num_collections = len(collections)
         per_collection = max_uploads // num_collections
         remainder = max_uploads % num_collections
-        
-        self.log.info('Distributing %d uploads across %d collections (%d each, %d extra)', 
+
+        self.log.info('Distributing %d uploads across %d collections (%d each, %d extra)',
                       max_uploads, num_collections, per_collection, remainder)
-        
-        all_files = []
+
+        # Collect fresh (not in last slideshow) and stale (were in last slideshow) separately
+        fresh_by_col = []  # list of (take_count, [fresh_rel_paths])
+        all_stale = []     # stale rel_paths across all collections — fallback pool
+
         for idx, collection in enumerate(collections):
             collection_path = os.path.join(self.media_root, collection)
             if not os.path.isdir(collection_path):
                 self.log.warning('Collection directory not found: %s', collection_path)
                 continue
-            
-            # Get files from this collection
+
             try:
-                collection_files = [
-                    f for f in os.listdir(collection_path) 
-                    if os.path.isfile(os.path.join(collection_path, f)) 
+                col_rel = [
+                    os.path.join(collection, f)
+                    for f in os.listdir(collection_path)
+                    if os.path.isfile(os.path.join(collection_path, f))
                     and self.get_file_type(os.path.join(collection_path, f)) in self.allowed_ext
                 ]
             except Exception as e:
                 self.log.warning('Failed to list collection %s: %s', collection, e)
                 continue
-            
-            # How many to take from this collection
+
             take_count = per_collection + (1 if idx < remainder else 0)
-            
-            if len(collection_files) > take_count:
-                selected = random.sample(collection_files, take_count)
-            else:
-                selected = collection_files
-            
-            # Store with collection prefix for tracking
-            for f in selected:
-                # Use relative path from media_root for proper folder handling
-                all_files.append(os.path.join(collection, f))
-            
-            self.log.info('Selected %d files from %s', len(selected), collection)
-        
-        # Filter out already uploaded files
-        new_files = [f for f in all_files if os.path.basename(f) not in self.uploaded_files.keys()]
-        self.log.info('Total new files to upload: %d', len(new_files))
-        return new_files
+
+            fresh = [f for f in col_rel if f not in last_paths]
+            stale = [f for f in col_rel if f in last_paths]
+            random.shuffle(fresh)
+            random.shuffle(stale)
+
+            fresh_by_col.append((take_count, fresh))
+            all_stale.extend(stale)
+            self.log.info('Collection %s: %d fresh, %d stale (of %d total)',
+                          collection, len(fresh), len(stale), len(col_rel))
+
+        # Fill slots from fresh files first, respecting per-collection quotas
+        selected = []
+        for take_count, fresh in fresh_by_col:
+            selected.extend(fresh[:take_count])
+
+        # Supplement with stale files if the fresh pool didn't fill all slots
+        deficit = max_uploads - len(selected)
+        if deficit > 0 and all_stale:
+            random.shuffle(all_stale)
+            selected.extend(all_stale[:deficit])
+            self.log.info('Supplementing with %d previously-shown file(s) (fresh pool was short)',
+                          min(deficit, len(all_stale)))
+
+        # Safety filter: never re-upload something already on the TV in this session
+        already_uploaded = set(self.uploaded_files.keys())
+        selected = [f for f in selected if os.path.basename(f) not in already_uploaded]
+
+        self.log.info('Total files selected for upload: %d', len(selected))
+        return selected
             
     async def update_files(self, files):
         '''
@@ -1471,7 +1504,7 @@ class monitor_and_display:
                 self._mqtt.username_pw_set(self.mqtt_username, self.mqtt_password)
             # Setup callbacks and logging
             self._mqtt.on_connect = self._on_mqtt_connect
-            self._mqtt.on_disconnect = self._on_mqtt_disconnect
+            self._mqtt.on_disconnect = self._on_mqtt_disconnect_compat
             self._mqtt.on_message = self._on_mqtt_message
             try:
                 # Use a compatibility wrapper so both paho v1 and v2 callback
@@ -1653,6 +1686,15 @@ class monitor_and_display:
         except Exception:
             pass
 
+    # paho v2 passes extra positional args (disconnect_flags, reason_code, properties).
+    def _on_mqtt_disconnect_compat(self, client, userdata, *args, **kwargs):
+        try:
+            # Last positional arg before any trailing properties is the rc/reason_code
+            rc = args[0] if args else 0
+            return self._on_mqtt_disconnect(client, userdata, rc)
+        except Exception:
+            pass
+
     def _on_mqtt_publish(self, client, userdata, mid):
         try:
             self.log.debug('MQTT published (mid=%s)', str(mid))
@@ -1735,7 +1777,7 @@ class monitor_and_display:
                 self._publish_and_wait(self.mqtt_state_topic, display or "", qos=1, retain=True)
             except Exception:
                 self._mqtt.publish(self.mqtt_state_topic, display or "", qos=0, retain=True)
-            attrs = {"file": file or "", "collection": collection or ""}
+            attrs = {"file": file or "", "collection": collection or "", "in_art_mode": self._in_art_mode if self._in_art_mode is not None else True}
             # Merge CSV columns (ensure every header key exists, even if blank)
             if self._csv_headers:
                 row = self._csv_by_file.get(file or "") or {}
@@ -2708,6 +2750,11 @@ class monitor_and_display:
                     self.log.info('Standby selected before cleanup: %s', self.standby_content_id)
                 except Exception as e:
                     self.log.warning('Failed to select standby before cleanup: %s', e)
+
+            # Snapshot the current selection so the next pick avoids repeating the same images
+            self._last_slideshow_paths = {
+                v.get('path_rel') for v in self.uploaded_files.values() if v.get('path_rel')
+            }
 
             ack('progress', 'Removing old uploads from TV...')
             await self.cleanup_old_uploads()

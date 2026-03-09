@@ -4,5 +4,23 @@
 			"path": "."
 		}
 	],
-	"settings": {}
+	"settings": {},
+	"tasks": {
+		"version": "2.0.0",
+		"tasks": [
+			{
+				"label": "Watch & Deploy to samsung-tv-art-uploader",
+				"type": "shell",
+				"command": "ls uploader.py www/index.html scripts/fetch_collections.sh | entr sh -c 'rsync -av --relative -e \"ssh -p 2222\" uploader.py www/index.html scripts/fetch_collections.sh local01:/volume1/docker/samsung-tv-art-uploader/ && ssh -p 2222 local01 \"/usr/local/bin/docker restart samsung-tv-art\"'",
+				"isBackground": true,
+				"problemMatcher": []
+			},
+			{
+				"label": "Watch & Copy HA card to samsung-tv-art-card",
+				"type": "shell",
+				"command": "echo ha-card/samsung-tv-art-card.js ha-card/README.md | tr ' ' '\\n' | entr sh -c 'rsync -av ha-card/samsung-tv-art-card.js ha-card/README.md ~/Documents/vscode/samsung-tv-art-card/'",
+				"isBackground": true
+			}
+		]
+	}
 }

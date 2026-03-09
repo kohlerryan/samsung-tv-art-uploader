@@ -4,7 +4,15 @@
 
 A custom [Home Assistant](https://www.home-assistant.io/) Lovelace card for controlling a Samsung Frame TV art display — browse collections, trigger artwork reseeds, and monitor live refresh progress, all from your HA dashboard.
 
-![Card showing current artwork with artist and title metadata](images/hacard.png)
+![Card showing current artwork with artist and title metadata](images/hacard_v0.2.0.png)
+
+---
+
+## ⚠️ Breaking Changes
+
+**v0.2.0-beta.1 and later requires [samsung-tv-art-uploader v0.2.0-beta.1](https://github.com/kohlerryan/samsung-tv-art-uploader/releases/tag/v0.2.0-beta.1) or later.**
+
+The Settings panel now configures MQTT broker credentials (host, port, username, password) instead of the previous max-uploads and interval fields. Those values have moved to the Slideshow Controls popup. Re-enter your MQTT credentials in the Settings panel after upgrading.
 
 ---
 
@@ -12,16 +20,16 @@ A custom [Home Assistant](https://www.home-assistant.io/) Lovelace card for cont
 
 - **Artwork display** — shows the currently active image with artist name, title, year, medium, and description pulled from MQTT sensor attributes
 - **Collection selector** — multi-select dropdown to choose which art collections the TV should cycle through
+- **Slideshow controls** — popup panel to configure slideshow mode (random / sequential), rotation interval, and max uploads; includes an Apply button to push settings to the backend
+- **Manual override** — toggle to pause the automatic slideshow and hand-pick artwork from a grid of available images; toggle off to resume normal rotation
 
-  ![Collection selector dropdown and controls](images/hacard_control.png)
-
+  ![Slideshow controls popup and manual override grid](images/hacard_slideshow_v0.2.0.png)
 - **Refresh** — clears uploads and re-seeds the TV with a fresh randomised set
 - **Update & Refresh** — fetches the latest collection updates from git, rebuilds the artwork database, then re-seeds
-- **Live progress log** — real-time status messages streamed from the backend during any refresh operation
-- **Settings panel** — configure TV IP address, max uploads, and rotation interval without leaving the dashboard
+- **Live progress log** — real-time status messages streamed from the backend during any refresh operation; state is preserved across page reloads for up to 15 minutes
+- **Settings panel** — configure TV IP address and MQTT broker connection (host, port, username, password) without leaving the dashboard; Apply & Restart pushes the new config and restarts the backend container
 
-  ![Settings panel with TV IP, max uploads, and interval fields](images/hacard_settings.png)
-
+  ![Settings panel with TV IP and MQTT broker fields](images/hacard_settings_v0.2.0.png)
 - **Mixed-content safe** — resolves image paths over HTTP or HTTPS to match the HA frontend protocol
 
 ---
@@ -31,7 +39,7 @@ A custom [Home Assistant](https://www.home-assistant.io/) Lovelace card for cont
 ### Option A — HACS
 
 1. In HACS → **Frontend** → ⋮ → **Custom repositories**, add:
-   - **URL**: `https://github.com/<your-user>/samsung-tv-art-card`
+   - **URL**: `https://github.com/kohlerryan/samsung-tv-art-card`
    - **Category**: Lovelace
 2. Click **Install** on the Samsung TV Art Card entry.
 3. Reload the browser.
@@ -48,7 +56,7 @@ A custom [Home Assistant](https://www.home-assistant.io/) Lovelace card for cont
    ```yaml
    lovelace:
      resources:
-       - url: /local/samsung-tv-art-card/samsung-tv-art-card.js?v=0.1.0-beta.1
+       - url: /local/samsung-tv-art-card/samsung-tv-art-card.js?v=v0.2.0-beta.2
          type: module
    ```
 
@@ -87,25 +95,9 @@ sync_ack_topic: frame_tv/ack/settings/sync_collections
 
 ---
 
-## Repository structure
-
-```
-samsung-tv-art-card.js   # Card source (loaded by HA as a Lovelace resource)
-hacs.json                # HACS metadata
-images/                  # Screenshots used in this README
-  hacard.png
-  hacard_control.png
-  hacard_settings.png
-README.md
-```
-
----
-
 ## Automations
 
 ### Trigger a refresh on HA startup
-
-The card displays live progress from the backend whenever a refresh is triggered — including auto-triggered reseeds. A useful companion automation publishes a refresh command shortly after HA starts so the TV is always seeded with fresh artwork after a restart:
 
 ```yaml
 # Frame TV Art Collections — trigger refresh on HA startup
@@ -130,4 +122,4 @@ The 1-minute delay gives the `samsung-tv-art` backend container time to fully st
 
 ## Version
 
-Current version: **v0.1.0** — bump the `?v=` cache-buster in the resource URL whenever you upgrade.
+Current version: **v0.2.0-beta.2** — bump the `?v=` cache-buster in the resource URL whenever you upgrade.

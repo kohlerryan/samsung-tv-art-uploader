@@ -294,7 +294,7 @@ When `SAMSUNG_TV_ART_LOCAL_WEB=true`, a web interface is available at `http://sa
 
 - **Collections** tab — select which collections are active and trigger a refresh
 - **Slideshow** tab — pick a fixed set of images to pin to the TV (Override mode), or configure the rotation interval and upload limit
-- **Settings** tab — adjust MQTT/TV connection settings without restarting the container
+- **Settings** tab — adjust MQTT/TV connection settings without restarting the container; includes a **Preload thumbnails** toggle (off by default) that eagerly fetches all slideshow images instead of loading them as you scroll. Action buttons are automatically disabled (with an explanatory message) when the TV is not in Art Mode, and show in-progress text while a command is pending
 
 ## Home Assistant card
 
