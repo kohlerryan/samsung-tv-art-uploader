@@ -1,5 +1,5 @@
 /**
- * Frame TV Art Card v0.2.0-beta.3
+ * Frame TV Art Card v0.2.0-beta.4
  */
 
 class FrameTVArtCard extends HTMLElement {
@@ -40,6 +40,7 @@ class FrameTVArtCard extends HTMLElement {
     this._slideshowAvailUnsubscribe = null;
     this._slideshowPostClear = false;           // blocks stale current_paths reseed after clear
     this._slideshowClearRefreshPending = false;  // set when Clear fires collections/refresh
+    this._slideshowUserRefreshPending = false;   // set when user clicks Refresh button
     this._postUploadRefreshTimer = null;         // retries available request after upload completes
     // Restore progress log if page was refreshed mid-sync (max 15 min TTL)
     try {
@@ -436,16 +437,16 @@ class FrameTVArtCard extends HTMLElement {
             if (this._slideshowOverridePaths.length) {
               this._slideshowSelected = new Set(this._slideshowOverridePaths);
             }
-          } else if (this._slideshowClearRefreshPending) {
-            // Full collections/refresh triggered by Clear Override has completed.
-            // current_paths is now fresh and authoritative — seed the grid from it.
-            this._slideshowClearRefreshPending = false;
+          } else if (this._slideshowClearRefreshPending || this._slideshowUserRefreshPending) {
+            // Keep flags set — seeding is deferred to the AVAIL handler so that
+            // current_paths and available are both fresh before the grid renders.
             this._slideshowPostClear = false;
-            this._slideshowSelected = new Set(this._slideshowCurrentPaths);
           } else {
-            // Background auto cycle: current_paths is still unreliable. Keep grid empty.
+            // Background auto cycle (startup reseed, timer): defer seeding to AVAIL handler.
+            // Set userRefreshPending so AVAIL seeds from fresh current_paths regardless of postClear.
             this._slideshowPostClear = true;
             this._slideshowSelected = new Set();
+            this._slideshowUserRefreshPending = true;
           }
           if (this._hass) {
             this._hass.callService('mqtt', 'publish', {
@@ -482,6 +483,25 @@ class FrameTVArtCard extends HTMLElement {
     const payload = this._parseJsonPayload(message);
     this._slideshowAvailable = (payload && Array.isArray(payload.images)) ? payload.images : [];
     if (this._config.preload_thumbnails) this._preloadThumbnails(this._slideshowAvailable);
+    // Always intersect seeds with available so there are never "ghost" selected paths
+    // that are invisible in the grid and silently inflate the atMax counter.
+    const availPathSet = new Set(this._slideshowAvailable.map(img => img.path));
+    if (!this._slideshowUploading) {
+      if (this._slideshowClearRefreshPending || this._slideshowUserRefreshPending) {
+        this._slideshowClearRefreshPending = false;
+        this._slideshowUserRefreshPending = false;
+        this._slideshowPostClear = false;
+        const seed = this._slideshowCurrentPaths.filter(p => availPathSet.has(p));
+        if (seed.length) this._slideshowSelected = new Set(seed);
+      } else if (this._slideshowSelected.size === 0 && !this._slideshowPostClear) {
+        const paths = this._slideshowMode === 'override' ? this._slideshowOverridePaths : this._slideshowCurrentPaths;
+        const seed = paths.filter(p => availPathSet.has(p));
+        if (seed.length) { this._slideshowSelected = new Set(seed); this._slideshowPostClear = false; }
+      } else {
+        // Prune any ghost selections carried over from a previous available list
+        this._slideshowSelected = new Set([...this._slideshowSelected].filter(p => availPathSet.has(p)));
+      }
+    }
     if (this._overridePanelOpen) this._renderOverrideGrid();
   }
 
@@ -1430,6 +1450,8 @@ class FrameTVArtCard extends HTMLElement {
         if (btnClear) btnClear.disabled = tvBlocked || this._refreshInProgress;
         const btnApply = this.querySelector('#ftv-apply');
         if (tvBlocked && btnApply) btnApply.disabled = true;
+        const opSettingsApplyBtn = this.querySelector('#ftv-op-settings-apply');
+        if ((tvBlocked || this._refreshInProgress) && opSettingsApplyBtn) opSettingsApplyBtn.disabled = true;
         if (envMsg) {
           if (tvBlocked) envMsg.textContent = 'TV is not in Art Mode — buttons unavailable.';
           else if (envMsg.textContent === 'TV is not in Art Mode — buttons unavailable.') envMsg.textContent = '';
@@ -1443,12 +1465,13 @@ class FrameTVArtCard extends HTMLElement {
     const openOverridePanel = () => {
       if (!this._overridePanelOpen) {
         this._overridePanelOpen = true;
-        // Only seed selection from paths when not in post-clear state
-        // (post-clear: current_paths is stale — user should pick fresh images)
-        if (!this._slideshowPostClear && this._slideshowSelected.size === 0) {
-          this._slideshowSelected = new Set(
-            this._slideshowOverridePaths.length ? this._slideshowOverridePaths : this._slideshowCurrentPaths
-          );
+        // Only seed selection from paths when not in post-clear state and not mid-upload
+        // (post-clear: current_paths is stale; uploading: paths are from old cache)
+        if (!this._slideshowPostClear && !this._slideshowUploading && this._slideshowSelected.size === 0) {
+          const availPathSet = new Set(this._slideshowAvailable.map(img => img.path));
+          const seed = (this._slideshowOverridePaths.length ? this._slideshowOverridePaths : this._slideshowCurrentPaths)
+            .filter(p => availPathSet.has(p));
+          if (seed.length) this._slideshowSelected = new Set(seed);
         }
         // Direct DOM toggle — avoids full re-render and background flash
         const _pop = this.querySelector('#ftv-override-popup');
@@ -1474,10 +1497,11 @@ class FrameTVArtCard extends HTMLElement {
       gridBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         this._overridePanelOpen = !this._overridePanelOpen;
-        if (this._overridePanelOpen && !this._slideshowPostClear && this._slideshowSelected.size === 0) {
-          this._slideshowSelected = new Set(
-            this._slideshowOverridePaths.length ? this._slideshowOverridePaths : this._slideshowCurrentPaths
-          );
+        if (this._overridePanelOpen && !this._slideshowPostClear && !this._slideshowUploading && this._slideshowSelected.size === 0) {
+          const availPathSet = new Set(this._slideshowAvailable.map(img => img.path));
+          const seed = (this._slideshowOverridePaths.length ? this._slideshowOverridePaths : this._slideshowCurrentPaths)
+            .filter(p => availPathSet.has(p));
+          if (seed.length) this._slideshowSelected = new Set(seed);
         }
         // Direct DOM toggle — avoids full re-render and background flash
         const _pop = this.querySelector('#ftv-override-popup');
@@ -1565,7 +1589,7 @@ class FrameTVArtCard extends HTMLElement {
       const changed = (opType && opType.value !== (this._slideshowSeq ? 'sequential' : 'random')) ||
         parseInt(opInterval?.value || 0, 10) !== this._slideshowUpdateMins ||
         parseInt(opMax?.value || 10, 10) !== this._slideshowMaxUploads;
-      opSettingsApply.disabled = !changed;
+      opSettingsApply.disabled = !changed || !!this._isStandbyLike || !!this._refreshInProgress;
     };
     if (opType) opType.addEventListener('change', slSettingsDirty);
     if (opInterval) opInterval.addEventListener('input', slSettingsDirty);
@@ -1930,7 +1954,7 @@ class FrameTVArtCard extends HTMLElement {
     }
   }
 
-console.info('%c FRAME-TV-ART-CARD %c v0.2.0-beta.3 ', 'color: white; background: #03a9f4; font-weight: bold;', '');
+console.info('%c FRAME-TV-ART-CARD %c v0.2.0-beta.4 ', 'color: white; background: #03a9f4; font-weight: bold;', '');
 
 // Register custom element so Lovelace can use <frame-tv-art-card>
 try {

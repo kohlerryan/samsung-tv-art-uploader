@@ -13,6 +13,12 @@ Built on top of [NickWaterton/samsung-tv-ws-api](https://github.com/NickWaterton
 > **⚠️ Breaking Change — v0.2.0-beta.1+:**  
 > The Slideshow Override feature requires **both** the uploader server **and** the Home Assistant card to be on `v0.2.0-beta.1` or later. Mixing a v0.2.0 server with a v0.1.x card (or vice versa) will cause the slideshow panel to malfunction. If you are not using the Slideshow Override feature this does not affect you.
 
+> **⚠️ Notable Changes — v0.2.0-beta.5 (uploader) / v0.2.0-beta.4 (HA card):**  
+> - Fixed ghost selections in the slideshow grid (invisible paths from old collections inflating the selected count and blocking new selections).
+> - Fixed Apply/Refresh buttons unlocking too early when the TV exits standby during an active refresh.
+> - Collections Apply button now shows a pulse animation while the refresh is in progress.
+> - Backend: uploaded file cache is now cleared before re-uploading, preventing under-fills when `max_uploads` was not reached.
+
 > **⚠️ Notable Changes — v0.2.0-beta.3:**  
 > **MQTT was silently disabled unless `MQTT_DISCOVERY=true` was set.** If you configured `SAMSUNG_TV_ART_MQTT_HOST` but never saw HA entities update, this was the cause. `MQTT_HOST` alone now correctly enables all MQTT features. No env changes required — remove any workaround `MQTT_DISCOVERY=true` you may have added if you do not want HA auto-discovery.
 >

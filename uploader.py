@@ -617,6 +617,7 @@ class monitor_and_display:
                     await asyncio.sleep(self.post_delete_recovery_seconds)
             self.cache = {}
             self.current_key = None
+            self.uploaded_files = {}  # cleared from TV; force clean slate for add_files headroom
             try:
                 if os.path.isfile(self.cache_path):
                     os.remove(self.cache_path)
@@ -844,6 +845,12 @@ class monitor_and_display:
         # Initialization complete — clear startup lock and let UI know it's safe
         self._startup_in_progress = False
         self._publish_slideshow_state()
+        # Force-publish current artwork state so UIs clear any stale in_art_mode=false
+        # retained from a previous session.
+        try:
+            await self._publish_current_artwork_state(force=True)
+        except Exception:
+            pass
         
     async def get_tv_content(self, category='MY-C0002'):
         '''
@@ -1812,13 +1819,17 @@ class monitor_and_display:
             return
         try:
             mode = 'override' if self.slideshow_override is not None else 'auto'
+            current_paths = [v.get('path_rel', k) for k, v in self.uploaded_files.items()]
+            missing_rel = [k for k, v in self.uploaded_files.items() if not v.get('path_rel')]
+            if missing_rel:
+                self.log.warning('uploaded_files entries missing path_rel (will use basename): %s', missing_rel)
             attrs = {
                 'mode': mode,
                 'sequential': self.sequential,
                 'update_minutes': int(max(0, (self.update_time or 0) / 60)),
                 'max_uploads': int(os.environ.get('SAMSUNG_TV_ART_MAX_UPLOADS', '10')),
                 'override_paths': list(self.slideshow_override) if self.slideshow_override else [],
-                'current_paths': [v.get('path_rel', k) for k, v in self.uploaded_files.items()],
+                'current_paths': current_paths,
                 'uploading': bool(self._refresh_in_progress or getattr(self, '_startup_in_progress', False)),
             }
             try:
@@ -1869,17 +1880,24 @@ class monitor_and_display:
                         'year': (csv_rec.get('year') or '').strip(),
                         'uploaded': path_rel in uploaded_paths,
                     })
-                    if len(images) >= 500:  # Cap to keep MQTT payload manageable
-                        break
-                if len(images) >= 500:
-                    break
+
+            # Cap to 500 images for manageable MQTT payload, but always include every
+            # uploaded file — breaking out of the collection loop early would exclude
+            # whole collections and cause the uploaded-overlap count to drop below max_uploads.
+            if len(images) > 500:
+                uploaded_imgs = [img for img in images if img['uploaded']]
+                other_imgs = [img for img in images if not img['uploaded']]
+                images = uploaded_imgs + other_imgs[:max(0, 500 - len(uploaded_imgs))]
 
             payload = json.dumps({'images': images}, separators=(',', ':'))
             try:
                 self._publish_and_wait(self.mqtt_slideshow_available_topic, payload, qos=1, retain=True)
             except Exception:
                 self._mqtt.publish(self.mqtt_slideshow_available_topic, payload, qos=0, retain=True)
-            self.log.info('Published slideshow available: %d images across %d collections', len(images), len(selected_set))
+            avail_paths = {img['path'] for img in images}
+            uploaded_overlap = uploaded_paths & avail_paths
+            self.log.info('Published slideshow available: %d images across %d collections (uploaded overlap: %d/%d)',
+                          len(images), len(selected_set), len(uploaded_overlap), len(uploaded_paths))
         except Exception as e:
             self.log.warning('MQTT slideshow available publish failed: %s', e)
 
@@ -2680,6 +2698,13 @@ class monitor_and_display:
         finally:
             self._refresh_in_progress = False
             self._publish_slideshow_state()
+            self._publish_slideshow_available()
+            # Force-publish current artwork state so UIs clear any stale in_art_mode=false
+            # retained from a previous session and correctly re-enable buttons.
+            try:
+                await self._publish_current_artwork_state(force=True)
+            except Exception:
+                pass
 
     async def _do_collections_refresh(self, req_id=None):
         """MQTT-triggered refresh: clears slideshow override then reseeds."""

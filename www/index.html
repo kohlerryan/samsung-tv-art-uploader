@@ -225,6 +225,12 @@
     #refresh svg { width: 22px; height: 22px; fill: #fff; display: block; }
     @keyframes spin { to { transform: rotate(360deg); } }
     #refresh.spinning svg { animation: spin 0.8s linear infinite; transform-origin: center; }
+    @keyframes ftvApplyPulse {
+      0%, 100% { background: #2f7fbf; }
+      50% { background: #d4920a; }
+    }
+    #apply.apply-pending { animation: ftvApplyPulse 1.4s ease-in-out infinite; }
+    #apply.apply-success { background: #2a9d5c !important; animation: none; transition: background 0.25s; }
 
     /* Mobile layout: place buttons below dropdown, side by side.
        Ensure up to three controls (refresh/apply/clear) share the row equally. */
@@ -252,7 +258,7 @@
         <div class="tab active" data-tab="nowplaying">Now Showing</div>
         <div class="tab" data-tab="slideshow">Slideshow</div>
         <div class="tab" data-tab="settings">Settings</div>
-        <span class="version-tag">v0.2.0-beta.4</span>
+        <span class="version-tag">v0.2.0-beta.5</span>
       </div>
       <div class="tabcontent">
         <div id="viewNowPlaying">
@@ -421,13 +427,25 @@
               const d = JSON.parse(payload.toString() || '{}');
               slideshowAvailable = d.images || [];
               preloadThumbnails(slideshowAvailable);
-              if (_availRetryTimer) { clearTimeout(_availRetryTimer); _availRetryTimer = null; } // stop retrying
-              // Re-seed selection if it is empty and we are not mid-upload.
-              // Covers: override mode never seeded, and auto mode where slideshowPostClear
-              // was set by a background cycle that ran while the tab was not open.
-              if (slideshowSelected.size === 0 && !slideshowUploading) {
-                const paths = slideshowMode === 'override' ? slideshowOverridePaths : slideshowCurrentPaths;
-                if (paths.length) { slideshowSelected = new Set(paths); slideshowPostClear = false; }
+              if (_availRetryTimer) { clearTimeout(_availRetryTimer); _availRetryTimer = null; }
+              // Always intersect seeds with available so there are never "ghost" selected paths
+              // that are invisible in the grid and silently inflate the atMax counter.
+              const availPathSet = new Set(slideshowAvailable.map(img => img.path));
+              if (!slideshowUploading) {
+                if (slideshowClearRefreshPending || slideshowUserRefreshPending) {
+                  slideshowClearRefreshPending = false;
+                  slideshowUserRefreshPending = false;
+                  slideshowPostClear = false;
+                  const seed = slideshowCurrentPaths.filter(p => availPathSet.has(p));
+                  if (seed.length) slideshowSelected = new Set(seed);
+                } else if (slideshowSelected.size === 0) {
+                  const paths = slideshowMode === 'override' ? slideshowOverridePaths : slideshowCurrentPaths;
+                  const seed = paths.filter(p => availPathSet.has(p));
+                  if (seed.length) { slideshowSelected = new Set(seed); slideshowPostClear = false; }
+                } else {
+                  // Prune any ghost selections that were carried over from a previous available list
+                  slideshowSelected = new Set([...slideshowSelected].filter(p => availPathSet.has(p)));
+                }
               }
               renderSlideshowGrid();
             } catch(_) {}
@@ -445,10 +463,18 @@
               }
               if (cmd === 'collections/refresh') {
                 const msg = (ack && ack.message) || '';
+                // Flash the apply button green when reload kicks off
+                if (applyPending && (status === 'queued' || status === 'started' || status === 'progress')) {
+                  if (_applyPendingTimer) { clearTimeout(_applyPendingTimer); _applyPendingTimer = null; }
+                  $apply.classList.remove('apply-pending');
+                  $apply.classList.add('apply-success');
+                  _applyPendingTimer = setTimeout(resetApplyBtn, 1400);
+                }
                 if (status === 'queued' || status === 'started' || status === 'progress') {
                   if (!refreshInProgress) {
                     // First message: lock and seed log
                     refreshInProgress = true;
+                    if ($refresh) { $refresh.disabled = true; $refresh.classList.add('spinning'); $refresh.style.opacity = '0.7'; }
                     refreshLog = ['Please stand by as artwork is loaded...'];
                     const standbyUrl = `${location.origin}/app/standby.default.png`;
                     $bg.innerHTML = `<img src="${standbyUrl}" alt="standby">`;
@@ -540,9 +566,10 @@
       const showApply = !!dirty;
       const showClear = staged.length > 0;
       if ($apply) {
-        $apply.disabled = !showApply || tvBlocked;
-        $apply.style.opacity = (showApply && !tvBlocked) ? 1 : 0.6;
-        $apply.style.display = showApply ? 'flex' : 'none';
+        const visible = showApply || applyPending;
+        $apply.disabled = !showApply || tvBlocked || applyPending;
+        $apply.style.opacity = (visible && !tvBlocked) ? 1 : 0.6;
+        $apply.style.display = visible ? 'flex' : 'none';
       }
       if ($clear) {
         const clearBlocked = tvBlocked || refreshInProgress;
@@ -630,6 +657,8 @@
     let refreshLog = [];
     let _refreshSafetyTimer = null;
     let _updateSettingsBtnState = null;
+    let applyPending = false;
+    let _applyPendingTimer = null;
 
     function stopRefreshSpinner() {
       if ($refresh) {
@@ -637,6 +666,13 @@
         if (!tvBlocked) { $refresh.disabled = false; $refresh.style.opacity = ''; }
       }
       updateButtons(); // re-evaluate trash can state now that refreshInProgress is clearing
+    }
+
+    function resetApplyBtn() {
+      applyPending = false;
+      if (_applyPendingTimer) { clearTimeout(_applyPendingTimer); _applyPendingTimer = null; }
+      if ($apply) { $apply.classList.remove('apply-pending', 'apply-success'); }
+      updateButtons();
     }
 
     function renderRefreshLog() {
@@ -807,17 +843,25 @@
         $refresh.classList.add('spinning');
         $refresh.disabled = true;
         $refresh.style.opacity = '0.7';
+        slideshowUserRefreshPending = true;
         client.publish(`${TOPIC_CMD_PREFIX}/collections/refresh`, JSON.stringify({ req_id: Date.now() }), { qos: 1, retain: false });
       };
     }
     if ($apply) {
       $apply.onclick = () => {
-        if (!dirty) return;
+        if (!dirty || applyPending || tvBlocked) return;
         client.publish(`${TOPIC_CMD_PREFIX}/collections/set`, JSON.stringify({ collections: staged, req_id: Date.now() }));
         baseline = staged.slice();
+        // Clear the grid selection and mark a user-triggered refresh so the post-upload
+        // state handler seeds the grid from the fresh current_paths (new collection).
+        slideshowSelected = new Set();
+        slideshowPostClear = false;
+        slideshowUserRefreshPending = true;
+        applyPending = true;
+        $apply.classList.add('apply-pending');
+        _applyPendingTimer = setTimeout(resetApplyBtn, 10000);
         updateButtons();
         syncTriggerText();
-        // Also apply uploader env overrides/restart if present in Settings (handled below)
       };
     }
     if ($clear) {
@@ -976,14 +1020,19 @@
         if ($refresh) { $refresh.disabled = true; $refresh.style.opacity = 0.5; }
         if ($apply) { $apply.disabled = true; $apply.style.opacity = 0.5; }
         if ($clear) { $clear.disabled = true; $clear.style.opacity = 0.5; }
+        if ($slApply) { $slApply.disabled = true; $slApply.style.opacity = 0.5; }
         if ($envMsg) $envMsg.textContent = 'TV is not in Art Mode \u2014 buttons unavailable.';
       } else {
         tvBlocked = false;
         markEnvDirty();
         $restartEnv.disabled = false; $restartEnv.style.opacity = '';
         $syncCollections.disabled = false; $syncCollections.style.opacity = '';
-        if ($refresh) { $refresh.disabled = false; $refresh.style.opacity = ''; }
+        if ($refresh) {
+          if (!refreshInProgress) { $refresh.disabled = false; $refresh.style.opacity = ''; }
+          // if refreshInProgress, stopRefreshSpinner() will re-enable once ack cycle finishes
+        }
         updateButtons();
+        markSlSettingsDirty();
         if ($envMsg && $envMsg.textContent === 'TV is not in Art Mode \u2014 buttons unavailable.') $envMsg.textContent = '';
       }
     };
@@ -1044,8 +1093,9 @@
     let slideshowMode = 'auto';
     let slideshowStandby = false;
     let slideshowReverting = false;
-    let slideshowPostClear = false;         // blocks size===0 reseed from stale current_paths after clear
-    let slideshowClearRefreshPending = false; // set when Clear fires collections/refresh; cleared when that refresh finishes
+    let slideshowPostClear = false;              // blocks size===0 reseed from stale current_paths after clear
+    let slideshowClearRefreshPending = false;    // set when Clear fires collections/refresh
+    let slideshowUserRefreshPending = false;     // set when user clicks Apply (collections) or Refresh
 
     function updateSlideshowState(data) {
       try {
@@ -1103,24 +1153,28 @@
             slideshowSelected = new Set(
               slideshowOverridePaths.length ? slideshowOverridePaths : slideshowCurrentPaths
             );
-          } else if (slideshowClearRefreshPending) {
-            // Full collections/refresh triggered by Clear Override has completed.
-            // current_paths is now fresh and authoritative — seed the grid from it.
-            slideshowClearRefreshPending = false;
+          } else if (slideshowClearRefreshPending || slideshowUserRefreshPending) {
+            // Keep flags set — seeding is deferred to the AVAIL handler so that
+            // current_paths and available are both fresh before the grid renders.
+            // (Seeding here causes "10/10 but only 3 thumbnails" because available
+            // still holds the old collection's images at this point.)
             slideshowPostClear = false;
-            slideshowSelected = new Set(slideshowCurrentPaths);
           } else {
-            // Background auto cycle: current_paths is still unreliable. Keep grid empty.
+            // Background auto cycle (startup reseed, timer): defer seeding to AVAIL handler.
+            // Set userRefreshPending so AVAIL seeds from fresh current_paths regardless of postClear.
             slideshowPostClear = true;
             slideshowSelected = new Set();
+            slideshowUserRefreshPending = true;
           }
         } else if (isOverride && !slideshowUploading && !slideshowPostClear
             && slideshowOverridePaths.length) {
           // Mode unchanged, override active: resync from server-authoritative override_paths
           // (handles server-side pruning of deleted files from override state).
           slideshowSelected = new Set(slideshowOverridePaths);
-        } else if (!slideshowReverting && !slideshowPostClear && slideshowSelected.size === 0) {
+        } else if (!slideshowReverting && !slideshowPostClear && slideshowSelected.size === 0 && !slideshowUploading) {
           // Initial load or settled state: seed from appropriate paths.
+          // Guard !slideshowUploading to avoid prematurely seeding from stale/partial
+          // current_paths that arrive with the first uploading=true state message.
           slideshowSelected = new Set(
             isOverride
               ? (slideshowOverridePaths.length ? slideshowOverridePaths : slideshowCurrentPaths)
@@ -1162,8 +1216,9 @@
       const mins = parseInt($slInterval.value || '0', 10);
       const maxU = parseInt($slMaxUploads ? ($slMaxUploads.value || '10') : '10', 10);
       const dirty = seq !== slSeqBaseline || mins !== slIntervalBaseline || maxU !== slMaxUploadsBaseline;
-      $slApply.disabled = !dirty;
-      $slApply.style.opacity = dirty ? 1 : 0.6;
+      const canApply = dirty && !tvBlocked && !refreshInProgress;
+      $slApply.disabled = !canApply;
+      $slApply.style.opacity = canApply ? 1 : 0.6;
     }
 
     function selectionMatchesBaseline() {

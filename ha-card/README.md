@@ -14,6 +14,12 @@ A custom [Home Assistant](https://www.home-assistant.io/) Lovelace card for cont
 
 The Settings panel now configures MQTT broker credentials (host, port, username, password) instead of the previous max-uploads and interval fields. Those values have moved to the Slideshow Controls popup. Re-enter your MQTT credentials in the Settings panel after upgrading.
 
+**v0.2.0-beta.4** — No config changes required.
+- Fixed ghost selections: paths from a previous collection could remain invisibly selected, inflating the selected count and blocking new selections.
+- Fixed Apply/Refresh buttons unlocking too early when the TV exits standby during an active refresh.
+- The collections Apply button now shows a pulse animation while the refresh is in progress.
+- Backend fix: uploaded file cache is now cleared before re-uploading, preventing under-fills when `max_uploads` was not reached.
+
 **v0.2.0-beta.3** — No config changes required, but two UI behaviours have changed:
 - The **Refresh** button now spins until the full backend refresh completes (up to ~8–12 s after the TV finishes uploading) instead of re-enabling after a fixed 6-second timeout. The button is also disabled when TV is not in Art Mode.
 - The **trash/delete** button (clear collections) is now disabled during any active refresh and while the TV is not in Art Mode, matching the existing Apply button behaviour.
@@ -62,7 +68,7 @@ If you are using the HA card alongside an older uploader server (pre-beta.3), th
    ```yaml
    lovelace:
      resources:
-       - url: /local/samsung-tv-art-card/samsung-tv-art-card.js?v=v0.2.0-beta.3
+       - url: /local/samsung-tv-art-card/samsung-tv-art-card.js?v=v0.2.0-beta.4
          type: module
    ```
 
@@ -128,4 +134,4 @@ The 1-minute delay gives the `samsung-tv-art` backend container time to fully st
 
 ## Version
 
-Current version: **v0.2.0-beta.3** — bump the `?v=` cache-buster in the resource URL whenever you upgrade.
+Current version: **v0.2.0-beta.4** — bump the `?v=` cache-buster in the resource URL whenever you upgrade.
