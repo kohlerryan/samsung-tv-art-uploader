@@ -245,7 +245,7 @@ class PIL_methods:
         img1 = img1.convert('L').resize((384, 216)).filter(ImageFilter.GaussianBlur(radius=2))
         img2 = img2.convert('L').resize((384, 216)).filter(ImageFilter.GaussianBlur(radius=2))
         img3 = ImageChops.difference(img1, img2)    #updated 11/3/25 per suggestion in issue #11
-        diff = sum(list(img3.getdata()))/(384*216)  #normalize
+        diff = sum(img3.get_flattened_data())/(384*216)  #normalize
         equal_content = diff <= 1.0                 #pick a threshhold
         self.log.debug('equal_content: {}, diff: {}'.format(equal_content, diff))
         return equal_content
@@ -271,10 +271,10 @@ class monitor_and_display:
         self.selection_mqtt_topic = os.environ.get('SAMSUNG_TV_ART_SELECTION_MQTT_TOPIC', 'frame_tv/selected_collections/state')
         self._pending_selection_change = False
         self.selection_only = os.environ.get('SAMSUNG_TV_ART_SELECTION_ONLY', '').lower() in ['1', 'true', 'yes']
-        self.artmode_refresh_seconds = int(os.environ.get('SAMSUNG_TV_ART_MODE_CHECK_SECONDS', '120'))
+        self.artmode_refresh_seconds = int(os.environ.get('SAMSUNG_TV_ART_MODE_CHECK_SECONDS', '5'))
         self.last_artmode_check = 0
         self.consecutive_failures = 0
-        self.max_backoff_seconds = 1800  # Max 30 minutes between retries
+        self.max_backoff_seconds = 15  # Max 15 seconds between art mode re-checks
         self.reconnect_delay = 5
         self.update_time = int(max(0, update_time*60))   #convert minutes to seconds
         self.period = min(max(5, period), self.update_time) if self.update_time > 0 else period
@@ -308,10 +308,17 @@ class monitor_and_display:
         self.pil = PIL_methods(self)
         self.tv = None  # Defer TV connection until start_monitoring
         # Rate limits (configurable)
-        self.upload_delay_seconds = int(os.environ.get('SAMSUNG_TV_ART_UPLOAD_DELAY_SECONDS', '15'))
-        self.delete_delay_seconds = int(os.environ.get('SAMSUNG_TV_ART_DELETE_DELAY_SECONDS', '5'))
-        # MQTT configuration (optional, for HA MQTT Discovery)
-        self.mqtt_enabled = os.environ.get('SAMSUNG_TV_ART_MQTT_DISCOVERY', 'false').lower() in ['1','true','yes']
+        self.upload_delay_seconds = int(os.environ.get('SAMSUNG_TV_ART_UPLOAD_DELAY_SECONDS', '1'))
+        self.delete_delay_seconds = int(os.environ.get('SAMSUNG_TV_ART_DELETE_DELAY_SECONDS', '1'))
+        self.post_delete_recovery_seconds = int(os.environ.get('SAMSUNG_TV_ART_POST_DELETE_RECOVERY_SECONDS', '5'))
+        # MQTT configuration (optional)
+        # mqtt_enabled: True when MQTT_HOST is explicitly configured, OR MQTT_DISCOVERY is set.
+        # Previously gated only on MQTT_DISCOVERY, which silently disabled all MQTT for users
+        # who configured MQTT_HOST but didn't need HA discovery.
+        _mqtt_host_set = bool(os.environ.get('SAMSUNG_TV_ART_MQTT_HOST'))
+        _mqtt_discovery_val = os.environ.get('SAMSUNG_TV_ART_MQTT_DISCOVERY', '').lower()
+        self.mqtt_discovery = _mqtt_discovery_val in ['1', 'true', 'yes']
+        self.mqtt_enabled = _mqtt_host_set or self.mqtt_discovery
         self.mqtt_host = os.environ.get('SAMSUNG_TV_ART_MQTT_HOST', 'mosquitto')
         self.mqtt_port = int(os.environ.get('SAMSUNG_TV_ART_MQTT_PORT', '1883'))
         self.mqtt_username = os.environ.get('SAMSUNG_TV_ART_MQTT_USERNAME')
@@ -372,14 +379,6 @@ class monitor_and_display:
         self._last_slideshow_paths = set() # path_rel values from the previous seed, used to avoid re-picking the same images
         self._loop = None
         self._collections_sync_running = False
-        # Optional mirror directory for Home Assistant media (e.g., bind-mounted /media)
-        self.mirror_dir = os.environ.get('SAMSUNG_TV_ART_MIRROR_DIR')
-        try:
-            if self.mirror_dir and not os.path.isdir(self.mirror_dir):
-                os.makedirs(self.mirror_dir, exist_ok=True)
-        except Exception:
-            # If we fail to create, disable mirroring silently
-            self.mirror_dir = None
         try:
             #doesn't work in Windows
             asyncio.get_running_loop().add_signal_handler(SIGINT, self.close)
@@ -558,35 +557,38 @@ class monitor_and_display:
             in_artmode = await self.tv.in_artmode()
             # Success - reset failure counter
             self.consecutive_failures = 0
-            if self._in_art_mode is True and not in_artmode:
-                # TV just left art mode — push an unavailable sentinel so UIs disable buttons
-                self._publish_mqtt_state('Unavailable', 'unavailable', None)
-            elif self._in_art_mode is False and in_artmode:
-                # TV just re-entered art mode — force immediate state republish on next cycle
-                self._last_state_publish = 0
+            prev = self._in_art_mode
             self._in_art_mode = bool(in_artmode)
+            if prev is True and not in_artmode:
+                # TV just left art mode — publish sentinel with in_art_mode: False so UIs disable
+                self._publish_mqtt_state('Unavailable', 'unavailable', None)
+            elif prev is False and in_artmode:
+                # TV just re-entered art mode — immediately republish so UIs re-enable
+                self._last_state_publish = 0
             return in_artmode
         except AssertionError:
             self.consecutive_failures += 1
             self.log.warning('TV artmode check failed (empty response, failure %d); treating as off', self.consecutive_failures)
-            if self._in_art_mode is True:
-                self._publish_mqtt_state('Unavailable', 'unavailable', None)
+            prev = self._in_art_mode
             self._in_art_mode = False
+            if prev is True:
+                self._publish_mqtt_state('Unavailable', 'unavailable', None)
             return False
         except Exception as e:
             self.consecutive_failures += 1
             self.log.warning('TV artmode check failed (failure %d): %s', self.consecutive_failures, e)
-            if self._in_art_mode is True:
-                self._publish_mqtt_state('Unavailable', 'unavailable', None)
+            prev = self._in_art_mode
             self._in_art_mode = False
+            if prev is True:
+                self._publish_mqtt_state('Unavailable', 'unavailable', None)
             return False
 
     def get_backoff_delay(self):
         """Calculate exponential backoff delay based on consecutive failures."""
         if self.consecutive_failures <= 1:
-            return self.artmode_refresh_seconds or 60
-        # Exponential backoff: 60, 120, 240, 480, 960, up to max_backoff_seconds
-        delay = min(60 * (2 ** (self.consecutive_failures - 1)), self.max_backoff_seconds)
+            return self.artmode_refresh_seconds or 5
+        # Exponential backoff: 5, 10, 15 (capped at max_backoff_seconds)
+        delay = min(5 * (2 ** (self.consecutive_failures - 1)), self.max_backoff_seconds)
         return delay
 
     async def cleanup_old_uploads(self):
@@ -612,7 +614,7 @@ class monitor_and_display:
                         await asyncio.sleep(self.delete_delay_seconds)
                     # Give TV significant time to recover after all deletions
                     self.log.info('Waiting for TV to recover after deletions...')
-                    await asyncio.sleep(30)
+                    await asyncio.sleep(self.post_delete_recovery_seconds)
             self.cache = {}
             self.current_key = None
             try:
@@ -643,11 +645,6 @@ class monitor_and_display:
                 if content_id:
                     self.standby_content_id = content_id
                     await self.tv.select_image(content_id)
-                    # Mirror standby for card fallback if mirroring is enabled
-                    try:
-                        self._mirror_add('standby.png', standby_path)
-                    except Exception:
-                        pass
                     # Publish standby via MQTT if enabled
                     if self.mqtt_enabled:
                         self._publish_mqtt_discovery()
@@ -723,6 +720,15 @@ class monitor_and_display:
         data = self.cache.get(self.current_key, {})
         self.uploaded_files = data.get('uploaded_files', {})
         self.start = data.get('last_update', time.time())
+        # Restore last slideshow paths so the next seed avoids repeating the same images.
+        # Fall back to deriving them from uploaded_files (backward compat with old cache).
+        persisted_paths = self.cache.get('_last_slideshow_paths')
+        if persisted_paths is not None:
+            self._last_slideshow_paths = set(persisted_paths)
+        elif self.uploaded_files:
+            self._last_slideshow_paths = {
+                v.get('path_rel') for v in self.uploaded_files.values() if v.get('path_rel')
+            }
 
     def _cache_selected_collections(self):
         try:
@@ -782,11 +788,15 @@ class monitor_and_display:
         await self.get_api_version()
         self.current_content_id = await self.get_current_artwork()
         self.log.info('Current artwork is: {}'.format(self.current_content_id))
-        # Publish current state at startup to avoid stale retained values
-        try:
-            await self._publish_current_artwork_state(force=True)
-        except Exception:
-            pass
+        # Publish current state at startup to avoid stale retained values.
+        # Skip when standby was just selected — ensure_standby_selected already published
+        # the correct 'Standby' state.  Polling the TV here can return the old artwork
+        # content_id (display-switch lag) and would overwrite the correct retained message.
+        if not self.standby_content_id:
+            try:
+                await self._publish_current_artwork_state(force=True)
+            except Exception:
+                pass
         # Fallback selection: if nothing selected via MQTT, restore cached selection
         # or auto-select all available collections so we don't sit on standby only.
         try:
@@ -904,6 +914,8 @@ class monitor_and_display:
         self.cache[key] = program_data
         # Persist current selected_collections for restart restore
         self.cache['_selected_collections'] = list(self.selected_collections)
+        # Persist last slideshow paths so the next seed avoids repeating the same images
+        self.cache['_last_slideshow_paths'] = list(self._last_slideshow_paths)
         self.save_cache()
             
     def read_file(self, filename):
@@ -1057,9 +1069,6 @@ class monitor_and_display:
                 self.update_uploaded_files(base_name, content_id, full_path=path)
                 if self.uploaded_files.get(base_name, {}).get('content_id'):
                     self.log.info('uploaded : {} to tv as {}'.format(display_name, self.uploaded_files[base_name]['content_id']))
-                    # Mirror to media directory for Home Assistant, if configured (preserve relative path when available)
-                    rel_for_copy = filename if os.path.dirname(filename) else base_name
-                    self._mirror_add(rel_for_copy, path)
                 else:
                     self.log.warning('file: {} failed to upload'.format(display_name))
                 self.write_program_data()
@@ -1095,10 +1104,6 @@ class monitor_and_display:
         #delete images from tv
         if content_ids_removed:
             await self.delete_files_from_tv(content_ids_removed)
-            # Mirror removals locally (preserve relative path if known)
-            for base in removed_basenames:
-                rel = self.uploaded_files.get(base, {}).get('path_rel', base)
-                self._mirror_remove(rel)
             return True
         return False
             
@@ -1109,7 +1114,21 @@ class monitor_and_display:
         When one or more collections are selected, uses collection-based randomization.
         '''
         max_uploads = int(os.environ.get('SAMSUNG_TV_ART_MAX_UPLOADS', '10'))
-        
+
+        # Account for images already on the TV (e.g. from failed/partial cleanup).
+        # We want the total on-TV count (including what's already there) to stay at
+        # or below max_uploads, not just blindly upload max_uploads more on top.
+        # Standby is always present and is not a slideshow slot, so exclude it from the count.
+        standby_basename = os.path.basename(self.standby) if self.standby else None
+        already_on_tv = len([
+            k for k in self.uploaded_files
+            if k not in self.exclude and k != standby_basename
+        ])
+        headroom = max(0, max_uploads - already_on_tv)
+        if headroom == 0:
+            self.log.info('TV already has %d/%d uploads; skipping add_files', already_on_tv, max_uploads)
+            return 0
+
         # If collections are selected, always source candidates from those collections
         # (works for single and multi-collection modes).
         collections = getattr(self, 'selected_collections', [])
@@ -1120,16 +1139,16 @@ class monitor_and_display:
             missing = [p for p in self.slideshow_override if p not in uploaded_paths]
             if not missing:
                 return 0  # All override files already on TV; nothing to upload
-            new_files = missing[:max_uploads]
+            new_files = missing[:headroom]
         elif len(collections) > 0:
-            new_files = await self.get_files_from_multiple_collections(collections, max_uploads)
+            new_files = await self.get_files_from_multiple_collections(collections, headroom)
         else:
             # Fallback: legacy single-folder mode when no collections are selected
             new_files = [f for f in files if f not in self.uploaded_files.keys()]
-            if len(new_files) > max_uploads:
-                self.log.info('Limiting upload from %d to %d files to protect TV', len(new_files), max_uploads)
+            if len(new_files) > headroom:
+                self.log.info('Limiting upload from %d to %d files to protect TV', len(new_files), headroom)
                 # Always pick a random sample for variety when changing collections
-                new_files = random.sample(new_files, max_uploads)
+                new_files = random.sample(new_files, headroom)
         
         #upload new files
         if new_files:
@@ -1227,133 +1246,6 @@ class monitor_and_display:
             return True
         return False
 
-    def _mirror_add(self, rel_path, src_full_path):
-        """Copy file to mirror directory as <mirror>/<rel_path> if enabled."""
-        if not self.mirror_dir:
-            return
-        try:
-            import shutil
-            # Normalize rel_path to avoid escaping mirror_dir
-            rel_norm = os.path.normpath(rel_path).lstrip(os.sep)
-            dest = os.path.join(self.mirror_dir, rel_norm)
-            # Ensure parent exists
-            os.makedirs(os.path.dirname(dest), exist_ok=True)
-            shutil.copy2(src_full_path, dest)
-            self.log.debug('Mirrored %s -> %s', src_full_path, dest)
-        except Exception as e:
-            self.log.debug('Mirror add failed for %s: %s', rel_path, e)
-
-    def _mirror_remove(self, rel_path):
-        """Remove mirrored file <mirror>/<rel_path> if present."""
-        if not self.mirror_dir:
-            return
-        try:
-            rel_norm = os.path.normpath(rel_path).lstrip(os.sep)
-            dest = os.path.join(self.mirror_dir, rel_norm)
-            if os.path.isfile(dest):
-                os.remove(dest)
-                self.log.debug('Removed mirrored file %s', dest)
-        except Exception as e:
-            self.log.debug('Mirror remove failed for %s: %s', rel_path, e)
-
-    def _mirror_clear_all(self):
-        """Clear all mirrored files and empty directories under mirror_dir.
-        Standby will be mirrored again by ensure_standby_selected() if configured.
-        """
-        if not self.mirror_dir:
-            return
-        try:
-            if not os.path.isdir(self.mirror_dir):
-                return
-            for root, dirs, files in os.walk(self.mirror_dir, topdown=False):
-                for name in files:
-                    path = os.path.join(root, name)
-                    try:
-                        os.remove(path)
-                    except Exception:
-                        pass
-                for d in dirs:
-                    dpath = os.path.join(root, d)
-                    try:
-                        os.rmdir(dpath)
-                    except Exception:
-                        # Not empty or can't remove — ignore
-                        pass
-            self.log.info('Cleared mirror directory: %s', self.mirror_dir)
-        except Exception as e:
-            self.log.debug('Mirror clear failed: %s', e)
-
-    def _mirror_prune_to_selected(self):
-        """Remove mirrored files that are not part of the currently selected collections.
-        Keeps:
-          - standby.png
-          - Files under <collection>/<file> where <collection> is selected and file exists in media_root
-          - Top-level files (no subfolder) whose basename exists in any selected collection (legacy single-folder mirror)
-        If no collections are selected, removes all except standby.png.
-        """
-        if not self.mirror_dir or not os.path.isdir(self.mirror_dir):
-            return
-        try:
-            selected = list(self.selected_collections or [])
-            # Build allowed sets from media_root for quick membership checks
-            present_relpaths = set()
-            present_basenames = set()
-            for col in selected:
-                col_dir = os.path.join(self.media_root, col)
-                if not os.path.isdir(col_dir):
-                    continue
-                try:
-                    for fname in os.listdir(col_dir):
-                        fullp = os.path.join(col_dir, fname)
-                        if os.path.isfile(fullp):
-                            present_relpaths.add(os.path.join(col, fname))
-                            present_basenames.add(fname)
-                except Exception:
-                    continue
-
-            deletions = 0
-            for root, _dirs, files in os.walk(self.mirror_dir):
-                for name in files:
-                    # Always keep standby
-                    if name.lower() == 'standby.png':
-                        continue
-                    fpath = os.path.join(root, name)
-                    rel = os.path.normpath(os.path.relpath(fpath, self.mirror_dir)).lstrip(os.sep)
-                    keep = False
-                    if selected:
-                        if os.sep in rel:
-                            # Expecting collection/filename
-                            parts = rel.split(os.sep, 1)
-                            collection, rest = parts[0], parts[1]
-                            if collection in selected and os.path.join(collection, os.path.basename(rest)) in present_relpaths:
-                                keep = True
-                        else:
-                            # Top-level file; keep if basename exists in any selected collection
-                            if rel in present_basenames:
-                                keep = True
-                    else:
-                        # No selection: remove everything except standby
-                        keep = False
-
-                    if not keep:
-                        try:
-                            os.remove(fpath)
-                            deletions += 1
-                        except Exception:
-                            pass
-            # Clean up empty dirs
-            for root, dirs, _files in os.walk(self.mirror_dir, topdown=False):
-                for d in dirs:
-                    dpath = os.path.join(root, d)
-                    try:
-                        os.rmdir(dpath)
-                    except Exception:
-                        pass
-            if deletions:
-                self.log.info('Pruned %d mirrored files not in selected collections', deletions)
-        except Exception as e:
-            self.log.debug('Mirror prune failed: %s', e)
-            
     async def wait_for_files(self, files):
         #wait for files to arrive
         await asyncio.sleep(min(10, 5 * len(files)))
@@ -1464,13 +1356,6 @@ class monitor_and_display:
         except Exception:
             collection = None
         display_name = os.path.splitext(base_name)[0]
-        # Ensure mirrored file exists before publishing so UIs can load it immediately
-        try:
-            if self.mirror_dir and os.path.isfile(full_path):
-                rel_for_copy = rel_path if rel_path else os.path.join(collection or '', base_name) if collection else base_name
-                self._mirror_add(rel_for_copy, full_path)
-        except Exception:
-            pass
         # Consolidated payload
         state_obj = {"display": display_name, "file": base_name, "collection": collection}
         state_str = json.dumps(state_obj, separators=(",", ":"))
@@ -1673,6 +1558,9 @@ class monitor_and_display:
                     self._publish_settings_state()
                 except Exception:
                     pass
+                # Reset artwork state refresh timer so the main loop immediately
+                # re-publishes the current artwork state after any (re)connect.
+                self._last_state_publish = 0
             else:
                 self.log.warning('MQTT connect failed (rc=%s)', str(rc_val))
         except Exception:
@@ -1710,6 +1598,14 @@ class monitor_and_display:
 
     def _publish_mqtt_discovery(self):
         if not self.mqtt_enabled or not self._mqtt or self._mqtt_config_published:
+            return
+        if not self.mqtt_discovery:
+            # Discovery disabled — just mark availability and skip HA config payload
+            try:
+                self._publish_and_wait(f"{self.mqtt_state_topic}/availability", "online", qos=1, retain=True)
+            except Exception:
+                pass
+            self._mqtt_config_published = True
             return
         try:
             obj_id = self.mqtt_unique_id
@@ -1801,7 +1697,7 @@ class monitor_and_display:
             return []
 
     def _publish_collections_discovery(self):
-        if not self.mqtt_enabled or not self._mqtt:
+        if not self.mqtt_enabled or not self._mqtt or not self.mqtt_discovery:
             return
         try:
             obj_id = self.mqtt_collections_unique_id
@@ -1832,7 +1728,7 @@ class monitor_and_display:
             self.log.warning('MQTT collections discovery publish failed: %s', e)
 
     def _publish_settings_discovery(self):
-        if not self.mqtt_enabled or not self._mqtt:
+        if not self.mqtt_enabled or not self._mqtt or not self.mqtt_discovery:
             return
         try:
             obj_id = 'frame_tv_art_settings'
@@ -2638,7 +2534,6 @@ class monitor_and_display:
             if await self.safe_in_artmode():
                 if selection_changed:
                     self.log.info('selection changed, syncing directory: {}'.format(self.folder))
-                    self._mirror_prune_to_selected()
                     await self._do_full_reseed()
                 # update tv art if enabled by timer
                 elif update_due:
@@ -2713,7 +2608,14 @@ class monitor_and_display:
                 collection = None
         else:
             # Unknown content (e.g., selected outside uploader); publish sentinel values
-            display = 'Unknown' if self.current_content_id else 'Standby'
+            if not self.current_content_id:
+                display = 'Standby'
+            elif self.standby_content_id and self.current_content_id == self.standby_content_id:
+                # TV is showing standby — report it correctly instead of 'Unknown'
+                display = 'Standby'
+                filename = 'standby.png'
+            else:
+                display = 'Unknown'
         try:
             self._publish_mqtt_discovery()
             self._publish_mqtt_state(display, filename or '', collection)
@@ -2780,12 +2682,11 @@ class monitor_and_display:
             self._publish_slideshow_state()
 
     async def _do_collections_refresh(self, req_id=None):
-        """MQTT-triggered refresh: clears slideshow override, prunes mirror then reseeds."""
+        """MQTT-triggered refresh: clears slideshow override then reseeds."""
         if self.slideshow_override is not None:
             self.slideshow_override = None
             self._save_slideshow_override()
             self._publish_slideshow_state()
-        self._mirror_prune_to_selected()
         await self._do_full_reseed(req_id=req_id)
             
 async def main():

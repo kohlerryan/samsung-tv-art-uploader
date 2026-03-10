@@ -1,5 +1,5 @@
 /**
- * Frame TV Art Card v0.2.0-beta.2
+ * Frame TV Art Card v0.2.0-beta.3
  */
 
 class FrameTVArtCard extends HTMLElement {
@@ -311,6 +311,11 @@ class FrameTVArtCard extends HTMLElement {
           this._refreshProgressLog = [];
           try { sessionStorage.removeItem('ftvHaRefreshLog'); sessionStorage.removeItem('ftvHaRefreshActive'); } catch(_) {}
           this._lastStateHash = '';
+          // Stop spinner
+          const _btnR = this.querySelector('#ftv-refresh');
+          if (_btnR) { _btnR.classList.remove('spinning'); if (!this._isStandbyLike) _btnR.disabled = false; }
+          const _btnC = this.querySelector('#ftv-clear');
+          if (_btnC && !this._isStandbyLike) _btnC.disabled = false;
           this._render();
         }
       }, delayMs);
@@ -1114,6 +1119,8 @@ class FrameTVArtCard extends HTMLElement {
             align-items: center;
             justify-content: center;
           }
+          @keyframes ftv-spin { to { transform: rotate(360deg); } }
+          .ftv-refresh.spinning ha-icon { animation: ftv-spin 0.8s linear infinite; display: flex; }
           .ftv-apply[disabled] {
             opacity: 0.5;
             cursor: default;
@@ -1418,7 +1425,9 @@ class FrameTVArtCard extends HTMLElement {
         if (btnRestartEnv) btnRestartEnv.disabled = tvBlocked;
         if (btnSyncCollections) btnSyncCollections.disabled = tvBlocked;
         if (tvBlocked && btnApplyEnv) btnApplyEnv.disabled = true;
-        if (btnRefresh) btnRefresh.disabled = tvBlocked;
+        if (btnRefresh) btnRefresh.disabled = tvBlocked || this._refreshInProgress;
+        const btnClear = this.querySelector('#ftv-clear');
+        if (btnClear) btnClear.disabled = tvBlocked || this._refreshInProgress;
         const btnApply = this.querySelector('#ftv-apply');
         if (tvBlocked && btnApply) btnApply.disabled = true;
         if (envMsg) {
@@ -1682,6 +1691,7 @@ class FrameTVArtCard extends HTMLElement {
 
     if (btnRefresh) btnRefresh.addEventListener('click', async (e) => {
       e.stopPropagation();
+      if (btnRefresh.disabled) return;
       try {
         const reqId = Date.now();
         this._lastRefreshReqId = reqId;
@@ -1696,8 +1706,8 @@ class FrameTVArtCard extends HTMLElement {
           await this._hass.callService('mqtt', 'publish', { topic: this._config.refresh_cmd_topic, payload: JSON.stringify({ req_id: reqId }), qos: 1, retain: false });
         }
         if (envMsg) envMsg.textContent = 'Requested collections refresh...';
+        btnRefresh.classList.add('spinning');
         btnRefresh.disabled = true;
-        setTimeout(() => { btnRefresh.disabled = false; if (envMsg && envMsg.textContent==='Requested collections refresh...') envMsg.textContent=''; }, 6000);
       } catch (err) {
         setStatus('Refresh failed to send. Check MQTT integration/service.', 8000);
       }
@@ -1768,6 +1778,7 @@ class FrameTVArtCard extends HTMLElement {
 
     this.querySelector('#ftv-clear').addEventListener('click', (e) => {
       e.stopPropagation();
+      if (this._isStandbyLike || this._refreshInProgress) return;
       // Stage-only clear; apply must be clicked to publish
       this._currentSelected = [];
       const triggerText = this.querySelector('.ftv-trigger-text');

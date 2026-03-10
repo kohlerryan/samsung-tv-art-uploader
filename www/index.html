@@ -223,6 +223,8 @@
     .ftv-apply svg, .ftv-clear svg { width: 22px; height: 22px; fill: #fff; display: block; }
     #refresh { width: 40px; height: 40px; border: none; border-radius: 8px; display: flex; align-items: center; justify-content: center; background: #4a6fa5; }
     #refresh svg { width: 22px; height: 22px; fill: #fff; display: block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #refresh.spinning svg { animation: spin 0.8s linear infinite; transform-origin: center; }
 
     /* Mobile layout: place buttons below dropdown, side by side.
        Ensure up to three controls (refresh/apply/clear) share the row equally. */
@@ -250,7 +252,7 @@
         <div class="tab active" data-tab="nowplaying">Now Showing</div>
         <div class="tab" data-tab="slideshow">Slideshow</div>
         <div class="tab" data-tab="settings">Settings</div>
-        <span class="version-tag">v0.2.0-beta.3</span>
+        <span class="version-tag">v0.2.0-beta.4</span>
       </div>
       <div class="tabcontent">
         <div id="viewNowPlaying">
@@ -463,6 +465,7 @@
                     refreshInProgress = false;
                     refreshLog = [];
                     setInfo._lastKey = null;
+                    stopRefreshSpinner();
                     try { sessionStorage.removeItem('ftvRefreshLog'); sessionStorage.removeItem('ftvRefreshActive'); } catch(_) {}
                     setInfo(lastAttrs || {});
                   }, status === 'ok' ? 8000 : 12000);
@@ -542,7 +545,9 @@
         $apply.style.display = showApply ? 'flex' : 'none';
       }
       if ($clear) {
-        $clear.disabled = !showClear;
+        const clearBlocked = tvBlocked || refreshInProgress;
+        $clear.disabled = !showClear || clearBlocked;
+        $clear.style.opacity = clearBlocked ? 0.5 : '';
         $clear.style.display = showClear ? 'flex' : 'none';
       }
 
@@ -626,6 +631,14 @@
     let _refreshSafetyTimer = null;
     let _updateSettingsBtnState = null;
 
+    function stopRefreshSpinner() {
+      if ($refresh) {
+        $refresh.classList.remove('spinning');
+        if (!tvBlocked) { $refresh.disabled = false; $refresh.style.opacity = ''; }
+      }
+      updateButtons(); // re-evaluate trash can state now that refreshInProgress is clearing
+    }
+
     function renderRefreshLog() {
       // Cancel the stale-state safety timer — a real ack just arrived
       if (_refreshSafetyTimer) { clearTimeout(_refreshSafetyTimer); _refreshSafetyTimer = null; }
@@ -655,6 +668,7 @@
               refreshInProgress = false;
               refreshLog = [];
               setInfo._lastKey = null;
+              stopRefreshSpinner();
               try { sessionStorage.removeItem('ftvRefreshLog'); sessionStorage.removeItem('ftvRefreshActive'); } catch(_) {}
               const $log = document.getElementById('refresh-log');
               if ($log) $log.innerHTML = '';
@@ -789,6 +803,10 @@
     }
     if ($refresh) {
       $refresh.onclick = () => {
+        if ($refresh.disabled) return;
+        $refresh.classList.add('spinning');
+        $refresh.disabled = true;
+        $refresh.style.opacity = '0.7';
         client.publish(`${TOPIC_CMD_PREFIX}/collections/refresh`, JSON.stringify({ req_id: Date.now() }), { qos: 1, retain: false });
       };
     }
@@ -957,6 +975,7 @@
         $syncCollections.disabled = true; $syncCollections.style.opacity = 0.5;
         if ($refresh) { $refresh.disabled = true; $refresh.style.opacity = 0.5; }
         if ($apply) { $apply.disabled = true; $apply.style.opacity = 0.5; }
+        if ($clear) { $clear.disabled = true; $clear.style.opacity = 0.5; }
         if ($envMsg) $envMsg.textContent = 'TV is not in Art Mode \u2014 buttons unavailable.';
       } else {
         tvBlocked = false;

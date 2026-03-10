@@ -27,11 +27,11 @@ ART_DIR="${SAMSUNG_TV_ART_ART_DIR:-/app/frame_tv_art_collections}"
 UPDATE_MINUTES="${SAMSUNG_TV_ART_UPDATE_MINUTES:-3}"
 CHECK_SECONDS="${SAMSUNG_TV_ART_CHECK_SECONDS:-60}"
 SEQUENTIAL="${SAMSUNG_TV_ART_SEQUENTIAL:-true}"
-STANDBY_FILE="${SAMSUNG_TV_ART_STANDBY_FILE:-/frame_tv_art_collections/standby.png}"
+STANDBY_FILE="${SAMSUNG_TV_ART_STANDBY_FILE:-/app/frame_tv_art_collections/standby.png}"
 EXCLUDE="${SAMSUNG_TV_ART_EXCLUDE:-$STANDBY_FILE}"
 TOKEN_FILE="${SAMSUNG_TV_ART_TOKEN_FILE:-/data/token_file.txt}"
 
-MEDIA_ROOT="${SAMSUNG_TV_ART_MEDIA_ROOT:-/frame_tv_art_collections}"
+MEDIA_ROOT="${SAMSUNG_TV_ART_MEDIA_ROOT:-/app/frame_tv_art_collections}"
 FETCH_ON_START="${SAMSUNG_TV_ART_FETCH_ON_START:-false}"
 
 ARGS=""
@@ -49,8 +49,6 @@ if [ "${SAMSUNG_TV_ART_DEBUG:-false}" = "true" ]; then
   ARGS="$ARGS -D"
 fi
 # HA REST integration removed in MQTT-only build
-
-# No sync step; read directly from /frame_tv_art_collections
 
 export SAMSUNG_TV_ART_MEDIA_ROOT="$MEDIA_ROOT"
 
@@ -107,9 +105,24 @@ if [ -n "$STANDBY_FILE" ]; then
   fi
 fi
 
+# Compute a friendly public hostname once — used by both mDNS and the web UI URL.
+# Precedence: explicit env var > container name > sanitized $HOSTNAME
+# Docker sets $HOSTNAME to a 12-char hex container ID; detect and replace with a
+# human-readable fallback so logs and mDNS advertisements make sense.
+HOST_NAME="${SAMSUNG_TV_ART_PUBLIC_HOSTNAME:-}"
+if [ -z "$HOST_NAME" ]; then
+  HOST_NAME="${SAMSUNG_TV_ART_CONTAINER_NAME:-${CONTAINER_NAME:-}}"
+fi
+if [ -z "$HOST_NAME" ]; then
+  if echo "${HOSTNAME}" | grep -qE '^[0-9a-f]{12}$'; then
+    HOST_NAME="samsung-tv-art"
+  else
+    HOST_NAME="${HOSTNAME:-samsung-tv-art}"
+  fi
+fi
+
 # Optional: advertise mDNS (.local) name and HTTP service via Avahi
 if [ "${SAMSUNG_TV_ART_MDNS_ENABLE:-true}" = "true" ]; then
-  HOST_NAME="${SAMSUNG_TV_ART_PUBLIC_HOSTNAME:-${HOSTNAME}}"
   DOMAIN_NAME="local"
 
   # ── 1. Ensure a machine-id exists (dbus refuses to start without one) ──────
@@ -213,7 +226,7 @@ EOF
 fi
 
 # Optional: serve local web UI + media via simple HTTP server
-if [ "${SAMSUNG_TV_ART_LOCAL_WEB:-false}" = "true" ]; then
+if [ "${SAMSUNG_TV_ART_LOCAL_WEB:-true}" = "true" ]; then
   # Generate env defaults for the web UI
   WS_HOST="${SAMSUNG_TV_ART_MQTT_HOST:-$HOSTNAME}"
   WS_PORT="${SAMSUNG_TV_ART_MQTT_WS_PORT:-9001}"
@@ -223,8 +236,8 @@ if [ "${SAMSUNG_TV_ART_LOCAL_WEB:-false}" = "true" ]; then
   if [ "${SAMSUNG_TV_ART_LOCAL_WEB_EXPOSE_PASSWORD:-false}" = "true" ]; then
     UI_PASS="${SAMSUNG_TV_ART_MQTT_PASSWORD:-}"
   fi
-  # Prefer a friendly hostname for the log/URL if provided; fall back to container name/id
-  PUBLIC_HOST="${SAMSUNG_TV_ART_PUBLIC_HOSTNAME:-${SAMSUNG_TV_ART_CONTAINER_NAME:-${CONTAINER_NAME:-${HOSTNAME}}}}"
+  # Use the already-computed friendly hostname (avoids raw container ID in URL)
+  PUBLIC_HOST="$HOST_NAME"
   mkdir -p /app/www
   cat > /app/www/env.json <<EOF
 {
