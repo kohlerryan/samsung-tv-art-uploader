@@ -191,6 +191,11 @@ Available collections:
 | [Gustave_Caillebotte](https://github.com/kohlerryan/Gustave_Caillebotte) | Gustave Caillebotte |
 | [Henri_Matisse](https://github.com/kohlerryan/Henri_Matisse) | Henri Matisse |
 | [Jackson_Pollock](https://github.com/kohlerryan/Jackson_Pollock) | Jackson Pollock |
+| [Keith_Haring](https://github.com/kohlerryan/Keith_Haring) | Keith Haring |
+| [Leonardo_da_Vinci](https://github.com/kohlerryan/Leonardo_da_Vinci) | Leonardo da Vinci |
+| [Mark_Rothko](https://github.com/kohlerryan/Mark_Rothko) | Mark Rothko |
+| [Max_Ernst](https://github.com/kohlerryan/Max_Ernst) | Max Ernst |
+| [Pablo_Picasso](https://github.com/kohlerryan/Pablo_Picasso) | Pablo Picasso |
 | [Vincent_van_Gogh](https://github.com/kohlerryan/Vincent_van_Gogh) | Vincent van Gogh |
 
 To use any of these, add their URLs to `SAMSUNG_TV_ART_COLLECTIONS` as a space-separated list. For example, to display Monet and Bierstadt:
@@ -236,6 +241,11 @@ https://github.com/kohlerryan/Gustav_Courbet.git
 https://github.com/kohlerryan/Gustave_Caillebotte.git
 https://github.com/kohlerryan/Henri_Matisse.git
 https://github.com/kohlerryan/Jackson_Pollock.git
+https://github.com/kohlerryan/Keith_Haring.git
+https://github.com/kohlerryan/Leonardo_da_Vinci.git
+https://github.com/kohlerryan/Mark_Rothko.git
+https://github.com/kohlerryan/Max_Ernst.git
+https://github.com/kohlerryan/Pablo_Picasso.git
 https://github.com/kohlerryan/Vincent_van_Gogh.git
 ```
 
