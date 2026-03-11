@@ -258,7 +258,7 @@
         <div class="tab active" data-tab="nowplaying">Now Showing</div>
         <div class="tab" data-tab="slideshow">Slideshow</div>
         <div class="tab" data-tab="settings">Settings</div>
-        <span class="version-tag">v0.2.0</span>
+        <span class="version-tag">v0.2.1</span>
       </div>
       <div class="tabcontent">
         <div id="viewNowPlaying">
@@ -651,6 +651,15 @@
     function formatMultiline(text) {
       return formatInline(text).replace(/\r?\n/g, '<br>');
     }
+    function parseArtworkInfo(file) {
+      if (!file) return { artist: null, title: file, year: null };
+      const raw = file.replace(/\.(jpg|jpeg|png|gif|bmp|webp)$/i, '');
+      const parts = raw.split('_');
+      if (parts.length >= 3 && /^\d{4}(-\d{4})?$/.test(parts[1]) && parseInt(parts[1]) >= 1000 && parseInt(parts[1]) <= 2100) {
+        return { artist: parts[0], year: parts[1], title: parts.slice(2).join(' ') };
+      }
+      return { artist: null, title: raw, year: null };
+    }
 
     let refreshInProgress = false;
     let lastAttrs = null;
@@ -757,9 +766,14 @@
       } else {
         $bg.style.background = '';
         if ($np) $np.classList.remove('standby-mode');
+        const _fb = (!title && !artist) ? parseArtworkInfo(file) : null;
+        const _dispTitle = title || (_fb && _fb.title) || file || 'Selected Artwork';
+        const _dispYear  = year  || (_fb && _fb.year)  || '';
+        const _dispArtist = artist || (_fb && _fb.artist) || '';
+        const _dispArtistLine = artistLine || (_dispArtist ? `<span style=\"font-size:1.1em; font-weight:bold; color: white;\">${formatInline(_dispArtist)}</span>` : '');
         t = `
-          ${artistLine ? `<div style=\"line-height:1.3; margin-top: 2px;\">${artistLine}</div>` : ''}
-          <div style=\"line-height:1.3; margin-top: 8px;\"><em style=\"font-size:1.1em; color: white;\">${formatInline(title || file || 'Selected Artwork')}</em>${year ? `<span style=\"font-size:0.9em; color: rgba(255,255,255,0.7);\">, ${escapeHtml(year)}</span>` : ''}</div>
+          ${_dispArtistLine ? `<div style=\"line-height:1.3; margin-top: 2px;\">${_dispArtistLine}</div>` : ''}
+          <div style=\"line-height:1.3; margin-top: 8px;\"><em style=\"font-size:1.1em; color: white;\">${formatInline(_dispTitle)}</em>${_dispYear ? `<span style=\"font-size:0.9em; color: rgba(255,255,255,0.7);\">, ${escapeHtml(_dispYear)}</span>` : ''}</div>
           ${medium ? `<div class=\"line\">${formatInline(medium)}</div>` : ''}
           <hr style="border: none; border-top: 1px solid rgba(255,255,255,0.15); margin: 8px 0; width: 100%;">
           ${hasDescription ? `<div style=\"text-align: justify; color: rgba(255,255,255,0.8); font-size: 0.9em; line-height: 1.4;\">${formatMultiline(description)}</div>` : ''}
