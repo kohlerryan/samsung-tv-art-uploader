@@ -10,21 +10,7 @@ Built on top of [NickWaterton/samsung-tv-ws-api](https://github.com/NickWaterton
 |---|---|
 | ![HA Card](assets/hacard_v0.2.0.png) | ![Web UI](assets/webui_now_showing_v0.2.0.png) |
 
-> **⚠️ Breaking Change — v0.2.0-beta.1+:**  
-> The Slideshow Override feature requires **both** the uploader server **and** the Home Assistant card to be on `v0.2.0-beta.1` or later. Mixing a v0.2.0 server with a v0.1.x card (or vice versa) will cause the slideshow panel to malfunction. If you are not using the Slideshow Override feature this does not affect you.
-
-> **⚠️ Notable Changes — v0.2.0-beta.5 (uploader) / v0.2.0-beta.4 (HA card):**  
-> - Fixed ghost selections in the slideshow grid (invisible paths from old collections inflating the selected count and blocking new selections).
-> - Fixed Apply/Refresh buttons unlocking too early when the TV exits standby during an active refresh.
-> - Collections Apply button now shows a pulse animation while the refresh is in progress.
-> - Backend: uploaded file cache is now cleared before re-uploading, preventing under-fills when `max_uploads` was not reached.
-
-> **⚠️ Notable Changes — v0.2.0-beta.3:**  
-> **MQTT was silently disabled unless `MQTT_DISCOVERY=true` was set.** If you configured `SAMSUNG_TV_ART_MQTT_HOST` but never saw HA entities update, this was the cause. `MQTT_HOST` alone now correctly enables all MQTT features. No env changes required — remove any workaround `MQTT_DISCOVERY=true` you may have added if you do not want HA auto-discovery.
->
-> **Upload/delete timing defaults are now much faster.** `UPLOAD_DELAY_SECONDS` changed from 15 → 1, `DELETE_DELAY_SECONDS` from 5 → 1, and `POST_DELETE_RECOVERY_SECONDS` from 30 → 5. Refreshes complete significantly quicker. If you see TV upload failures after a refresh, increase `SAMSUNG_TV_ART_POST_DELETE_RECOVERY_SECONDS` in your env file.
->
-> **`STANDBY_FILE` default path was incorrect.** If you explicitly set `SAMSUNG_TV_ART_STANDBY_FILE=/frame_tv_art_collections/standby.png` (the old broken default), update it to `/app/frame_tv_art_collections/standby.png`.
+> **Upgrading from v0.1.x?** See the [v0.2.0 release notes](https://github.com/kohlerryan/samsung-tv-art-uploader/releases/tag/v0.2.0) for breaking changes and what's new.
 
 ## Features
 

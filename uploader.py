@@ -2679,6 +2679,17 @@ class monitor_and_display:
             ack('progress', 'Removing old uploads from TV...')
             await self.cleanup_old_uploads()
 
+            # Re-select standby after cleanup: the TV can revert to the last playing art
+            # (e.g. the previous override image) during the deletion pass, then fall back
+            # to its built-in default when that image is also deleted.  Re-pinning here
+            # ensures we hold standby for the entire upload phase.
+            if self.standby_content_id:
+                try:
+                    await self.tv.select_image(self.standby_content_id)
+                    self.log.info('Standby re-selected after cleanup: %s', self.standby_content_id)
+                except Exception as e:
+                    self.log.warning('Failed to re-select standby after cleanup: %s', e)
+
             ack('progress', 'Uploading new artwork to TV...')
             await self.sync_file_list()
             files_added = await self.add_files([])
