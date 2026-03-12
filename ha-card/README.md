@@ -52,7 +52,7 @@ A custom [Home Assistant](https://www.home-assistant.io/) Lovelace card for cont
    ```yaml
    lovelace:
      resources:
-       - url: /local/samsung-tv-art-card/samsung-tv-art-card.js?v=v0.2.0
+       - url: /local/samsung-tv-art-card/samsung-tv-art-card.js?v=v0.2.1
          type: module
    ```
 
@@ -118,4 +118,4 @@ The 1-minute delay gives the `samsung-tv-art` backend container time to fully st
 
 ## Version
 
-Current version: **v0.2.0** — bump the `?v=` cache-buster in the resource URL whenever you upgrade.
+Current version: **v0.2.1** — bump the `?v=` cache-buster in the resource URL whenever you upgrade.

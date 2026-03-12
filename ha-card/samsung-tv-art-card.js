@@ -1,5 +1,5 @@
 /**
- * Frame TV Art Card v0.2.0
+ * Frame TV Art Card v0.2.1
  */
 
 class FrameTVArtCard extends HTMLElement {
@@ -718,9 +718,7 @@ class FrameTVArtCard extends HTMLElement {
           ` : '';
           // Middle: artwork_title, artwork_year (title italic, year lighter)
           const middleLine = `
-            <div style="line-height:1.3; margin-top: 8px;">
-              <em style="font-size:1.1em; color: white;">${this._formatInline(titleText)}</em>
-              ${year ? `<span style=\"font-size:0.9em; color: rgba(255,255,255,0.7);\">, ${year}</span>` : ''}
+            <div style="line-height:1.3; margin-top: 8px;"><em style="font-size:1.1em; color: white;">${this._formatInline(titleText)}</em>${year ? `<span style=\"font-size:0.9em; color: rgba(255,255,255,0.7);\">, ${year}</span>` : ''}
             </div>
           `;
           // Bottom: artwork_medium
@@ -1954,7 +1952,7 @@ class FrameTVArtCard extends HTMLElement {
     }
   }
 
-console.info('%c FRAME-TV-ART-CARD %c v0.2.0 ', 'color: white; background: #03a9f4; font-weight: bold;', '');
+console.info('%c FRAME-TV-ART-CARD %c v0.2.1 ', 'color: white; background: #03a9f4; font-weight: bold;', '');
 
 // Register custom element so Lovelace can use <frame-tv-art-card>
 try {
