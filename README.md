@@ -194,9 +194,15 @@ Available collections:
 | [Keith_Haring](https://github.com/kohlerryan/Keith_Haring) | Keith Haring |
 | [Leonardo_da_Vinci](https://github.com/kohlerryan/Leonardo_da_Vinci) | Leonardo da Vinci |
 | [Mark_Rothko](https://github.com/kohlerryan/Mark_Rothko) | Mark Rothko |
+| [Mary_Cassatt](https://github.com/kohlerryan/Mary_Cassatt) | Mary Cassatt |
 | [Max_Ernst](https://github.com/kohlerryan/Max_Ernst) | Max Ernst |
 | [Pablo_Picasso](https://github.com/kohlerryan/Pablo_Picasso) | Pablo Picasso |
+| [Paul_Cezanne](https://github.com/kohlerryan/Paul_Cezanne) | Paul Cézanne |
+| [Paul_Gauguin](https://github.com/kohlerryan/Paul_Gauguin) | Paul Gauguin |
+| [Rembrandt_Harmenszoon_van_Rijn](https://github.com/kohlerryan/Rembrandt_Harmenszoon_van_Rijn) | Rembrandt van Rijn |
+| [Sandro_Botticelli](https://github.com/kohlerryan/Sandro_Botticelli) | Sandro Botticelli |
 | [Vincent_van_Gogh](https://github.com/kohlerryan/Vincent_van_Gogh) | Vincent van Gogh |
+| [Winslow_Homer](https://github.com/kohlerryan/Winslow_Homer) | Winslow Homer |
 
 To use any of these, add their URLs to `SAMSUNG_TV_ART_COLLECTIONS` as a space-separated list. For example, to display Monet and Bierstadt:
 
@@ -244,9 +250,15 @@ https://github.com/kohlerryan/Jackson_Pollock.git
 https://github.com/kohlerryan/Keith_Haring.git
 https://github.com/kohlerryan/Leonardo_da_Vinci.git
 https://github.com/kohlerryan/Mark_Rothko.git
+https://github.com/kohlerryan/Mary_Cassatt.git
 https://github.com/kohlerryan/Max_Ernst.git
 https://github.com/kohlerryan/Pablo_Picasso.git
+https://github.com/kohlerryan/Paul_Cezanne.git
+https://github.com/kohlerryan/Paul_Gauguin.git
+https://github.com/kohlerryan/Rembrandt_Harmenszoon_van_Rijn.git
+https://github.com/kohlerryan/Sandro_Botticelli.git
 https://github.com/kohlerryan/Vincent_van_Gogh.git
+https://github.com/kohlerryan/Winslow_Homer.git
 ```
 
 > Save this as `data/collections.list` in the directory where you run `docker compose`. The `data/` folder is already bind-mounted by the default compose file.
