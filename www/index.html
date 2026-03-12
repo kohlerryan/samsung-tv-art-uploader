@@ -77,11 +77,21 @@
     /* Now Playing layout: flex column with order so standby text sits above the image */
     #viewNowPlaying { display: flex; flex-direction: column; }
     #viewNowPlaying .bg   { order: 1; }
-    #viewNowPlaying .info { order: 2; margin-top: 12px; }
+    #viewNowPlaying .info-wrap { order: 2; margin-top: 12px; }
     #viewNowPlaying #refresh-log { order: 3; }
     /* Standby mode: text above image */
-    #viewNowPlaying.standby-mode .info { order: 1; margin-top: 0; }
+    #viewNowPlaying.standby-mode .info-wrap { order: 1; margin-top: 0; }
     #viewNowPlaying.standby-mode .bg   { order: 2; margin-top: 10px; }
+    /* Info section: scrollable with fade at bottom */
+    .info-wrap { position: relative; }
+    .info { max-height: 30vh; overflow-y: auto; }
+    .info-fade {
+      position: absolute;
+      bottom: 0; left: 0; right: 0;
+      height: 48px;
+      background: linear-gradient(to bottom, transparent, #1e1a18);
+      pointer-events: none;
+    }
 
     /* Tabs styled like folder (pentaflex) tabs */
     .tabbar { display: flex; gap: 6px; margin: 0 0 0 4px; align-items: flex-end; }
@@ -263,7 +273,10 @@
       <div class="tabcontent">
         <div id="viewNowPlaying">
           <div class="bg" id="bg"></div>
-          <div class="info" id="info"></div>
+          <div class="info-wrap">
+            <div class="info" id="info"></div>
+            <div class="info-fade"></div>
+          </div>
           <div id="refresh-log"></div>
         </div>
         <div id="viewSettings" style="display:none;">

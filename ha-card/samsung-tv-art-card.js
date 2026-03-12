@@ -880,6 +880,7 @@ class FrameTVArtCard extends HTMLElement {
     const isStandby = isNotInArtMode || this._refreshInProgress || !normalizedFile || normalizedFile === 'standby.png' || normalizedFile === 'unknown' || normalizedFile === 'unavailable' || normalizedFile === 'none';
     this._isStandbyLike = isStandby;
     const hasArtwork = bgUrl !== null;
+    const isCompressed = (this._config.layout_mode || 'compressed') !== 'expanded';
 
     // Initialize staged selection to baseline on render
     this._currentSelected = Array.isArray(this._currentSelected) && this._dropdownOpen
@@ -917,6 +918,7 @@ class FrameTVArtCard extends HTMLElement {
             padding: 12px;
             position: relative;
             border-radius: var(--ha-card-border-radius, 12px);
+            ${isCompressed ? 'aspect-ratio: 16/9; display: flex; flex-direction: column; box-sizing: border-box;' : ''}
             ${isNotInArtMode ? '' : hasArtwork ? `background: linear-gradient(rgba(0,0,0,0.1), rgba(0,0,0,0.1)), url("${bgUrl}"); background-size: cover; background-position: center;` : ''}
           }
           .ftv-header {
@@ -1092,13 +1094,15 @@ class FrameTVArtCard extends HTMLElement {
             justify-content: center;
           }
           .ftv-progress-wrap {
-            ${hasArtwork ? 'background: rgba(0,0,0,0.5); border-radius: 8px; overflow: hidden;' : ''}
+            ${hasArtwork ? 'background: rgba(0,0,0,0.5); border-radius: 8px;' : ''}
+            ${isCompressed ? 'flex: 1; min-height: 0; overflow: hidden; position: relative; display: flex; flex-direction: column;' : (hasArtwork ? 'overflow: hidden;' : '')}
           }
           .ftv-info {
             display: block;
             width: 100%;
             box-sizing: border-box;
             padding: 12px;
+            ${isCompressed ? 'flex: 1; min-height: 0; overflow-y: auto;' : ''}
             ${hasArtwork ? 'color: white;' : ''}
           }
           .ftv-refresh-log {
@@ -1107,6 +1111,16 @@ class FrameTVArtCard extends HTMLElement {
             ${hasArtwork ? 'padding: 0 12px 10px; color: rgba(255,255,255,0.75);' : 'color: var(--secondary-text-color);'}
           }
           .ftv-refresh-log:empty { display: none; }
+          ${isCompressed ? `
+          .ftv-info-fade {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 56px;
+            background: linear-gradient(to bottom, transparent, ${hasArtwork && !isNotInArtMode ? 'rgba(0,0,0,0.85)' : 'var(--ha-card-background-color, var(--card-background-color, #fff))'});
+            pointer-events: none;
+          }` : ''}
           .ftv-status {
             margin-top: 0;
             min-height: 0;
@@ -1349,6 +1363,7 @@ class FrameTVArtCard extends HTMLElement {
           <div class="ftv-progress-wrap">
             <div class="ftv-info">${artworkText}</div>
             <div class="ftv-refresh-log"></div>
+            ${isCompressed ? '<div class="ftv-info-fade"></div>' : ''}
           </div>
           <div class="ftv-settings" id="ftv-settings">
             <div class="ftv-panel-header">Settings</div>
