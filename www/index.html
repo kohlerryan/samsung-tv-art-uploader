@@ -37,7 +37,12 @@
     }
     /* Ensure extra side padding on very small screens */
     @media (max-width: 480px) {
-      .wrap { padding-left: 22px; padding-right: 22px; }
+      html, body { background: #1e1a18; }
+      .wrap { padding: 0; }
+      .card { border-radius: 0; border: none; box-shadow: none; padding: 16px 0 0; }
+      .tabbar { margin-left: 12px; }
+      .tabcontent { border-radius: 0; border-left: none; border-right: none; border-bottom: none; }
+      .version-tag { padding-right: 12px; }
     }
     .card {
       width: 100%;
@@ -45,7 +50,7 @@
       background: #1e1a18; /* dark brown */
       border: 1px solid #3a2f2a;
       border-radius: 12px;
-      padding: 16px;
+      padding: 16px 16px 4px;
       box-shadow: 0 8px 20px rgba(0,0,0,0.35);
       box-sizing: border-box;
     }
@@ -74,28 +79,22 @@
     .bg { width: 100%; border-radius: 8px; background-color: #0d0c0b; overflow: hidden; border: 1px solid #3a2f2a; }
     .bg img { width: 100%; height: auto; display: block; border-radius: 8px; }
     #refresh-log { margin-top: 10px; font-size: 0.85em; color: #b6aba4; line-height: 1.6; }
-    /* Now Playing layout: flex column with order so standby text sits above the image */
-    #viewNowPlaying { display: flex; flex-direction: column; }
-    #viewNowPlaying .bg   { order: 1; }
+    /* Now Playing layout: flex column filling the full tab-content height */
+    #viewNowPlaying { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+    #viewNowPlaying .bg   { order: 1; flex-shrink: 0; }
     #viewNowPlaying .info-wrap { order: 2; margin-top: 12px; }
-    #viewNowPlaying #refresh-log { order: 3; }
-    /* Standby mode: text above image */
-    #viewNowPlaying.standby-mode .info-wrap { order: 1; margin-top: 0; }
+    #viewNowPlaying #refresh-log { order: 3; flex-shrink: 0; }
+    /* Standby mode: text above image; info-wrap and bg both shrink to content — no flex growth */
+    #viewNowPlaying.standby-mode .info-wrap { order: 1; margin-top: 0; flex: 0 0 auto; }
+    #viewNowPlaying.standby-mode .info { height: auto; }
     #viewNowPlaying.standby-mode .bg   { order: 2; margin-top: 10px; }
-    /* Info section: scrollable with fade at bottom */
-    .info-wrap { position: relative; }
-    .info { max-height: 30vh; overflow-y: auto; }
-    .info-fade {
-      position: absolute;
-      bottom: 0; left: 0; right: 0;
-      height: 48px;
-      background: linear-gradient(to bottom, transparent, #1e1a18);
-      pointer-events: none;
-    }
+    /* Info section: .info-wrap is the flex child that takes remaining space; .info scrolls */
+    .info-wrap { flex: 1; min-height: 0; }
+    .info { height: 100%; overflow-y: auto; }
 
     /* Tabs styled like folder (pentaflex) tabs */
-    .tabbar { display: flex; gap: 6px; margin: 0 0 0 4px; align-items: flex-end; }
-    .version-tag { margin-left: auto; padding: 4px 8px; font-size: 11px; color: #7a6e68; letter-spacing: .4px; align-self: center; user-select: none; }
+    .tabbar { display: flex; gap: 6px; margin: 0 0 0 12px; align-items: flex-end; }
+    .version-tag { display: block; text-align: right; padding: 1px 12px 2px; font-size: 11px; color: #7a6e68; letter-spacing: .4px; user-select: none; pointer-events: none; }
     .tab {
       padding: 8px 14px;
       background: #2a2623;
@@ -113,12 +112,14 @@
     .tab.active { background: #1e1a18; color: #f0ece6; border-color: #5b4a44; }
     .tabcontent {
       border: 1px solid #5b4a44;
-      border-radius: 0 12px 12px 12px;
-      padding: 14px;
+      border-radius: 12px;
+      padding: 14px 14px 7px;
       background: #1e1a18;
       flex: 1 1 0;
       min-height: 0;
-      overflow-y: auto;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
     }
 
     /* Responsive layout to avoid horizontal overflow on phones */
@@ -263,23 +264,21 @@
 <body>
   <div class="wrap">
     <!-- Control/Settings component with folder-style tabs -->
-    <div class="card control-card">
+    <div class="card control-card" style="position:relative;">
       <div class="tabbar">
         <div class="tab active" data-tab="nowplaying">Now Showing</div>
         <div class="tab" data-tab="slideshow">Slideshow</div>
         <div class="tab" data-tab="settings">Settings</div>
-        <span class="version-tag">v0.2.1</span>
       </div>
       <div class="tabcontent">
         <div id="viewNowPlaying">
           <div class="bg" id="bg"></div>
           <div class="info-wrap">
             <div class="info" id="info"></div>
-            <div class="info-fade"></div>
           </div>
           <div id="refresh-log"></div>
         </div>
-        <div id="viewSettings" style="display:none;">
+        <div id="viewSettings" style="display:none; flex: 1; min-height: 0; overflow-y: auto;">
           <h1>Settings</h1>
           <div class="hint">MQTT WebSocket defaults come from env.json and persisted overrides; changes here are saved.</div>
           <div class="row" style="margin-top:8px; align-items: stretch; gap: 6px;">
@@ -295,7 +294,7 @@
             </label>
           </div>
         </div>
-        <div id="viewSlideshow" style="display:none;">
+        <div id="viewSlideshow" style="display:none; flex: 1; min-height: 0; overflow-y: auto;">
           <h1>Slideshow</h1>
           <!-- Collection picker -->
           <div class="row">
@@ -352,9 +351,8 @@
           <div id="sl-msg" class="hint" style="margin-top:8px;"></div>
         </div>
       </div>
+      <span class="version-tag">v0.2.2-beta.1</span>
     </div>
-
-
   </div>
   <script>
     // Settings helpers (localStorage + query param override)
@@ -555,6 +553,7 @@
     const $dropdown = document.getElementById('ftv-dropdown');
     const $info = document.getElementById('info');
     const $bg = document.getElementById('bg');
+
     // Removed selected hint; trigger shows selection
     const $apply = document.getElementById('apply');
     const $clear = document.getElementById('clear');
@@ -793,6 +792,10 @@
         `;
       }
       $info.innerHTML = t;
+      // Generation counter: prevents a stale img.onload from overwriting a later setInfo call
+      // (e.g. TV leaves art mode — $bg is cleared — then old async load fires and puts image back)
+      setInfo._gen = (setInfo._gen || 0) + 1;
+      const gen = setInfo._gen;
 
       // Build image URL using this host's static server (provided by uploader)
       if (file && !isStandby && !isNotInArtMode) {
@@ -801,11 +804,15 @@
         const url = `${location.origin}/app/frame_tv_art_collections/${encodeURIComponent(folder)}/${encodeURIComponent(file)}`;
         // Preload to ensure show/hide behavior for standby vs artwork
         const img = new Image();
-        img.onload = () => { $bg.innerHTML = `<img src="${url}" alt="artwork">`; };
+        img.onload = () => { if (setInfo._gen === gen) $bg.innerHTML = `<img src="${url}" alt="artwork">`; };
         img.onerror = () => {
+          if (setInfo._gen !== gen) return;
           // Fallback to immutable baked standby image if artwork load fails
           const standbyUrl = `${location.origin}/app/standby.default.png`;
           $bg.innerHTML = `<img src="${standbyUrl}" alt="standby">`;
+          // Clear cache key so next MQTT message retries the artwork image
+          // (e.g. after a container restart briefly causes a 404)
+          setInfo._lastKey = null;
         };
         img.src = url;
       } else if (!isNotInArtMode) {

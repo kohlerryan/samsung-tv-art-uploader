@@ -1,5 +1,5 @@
 /**
- * Frame TV Art Card v0.2.1
+ * Frame TV Art Card v0.2.1-beta.1
  */
 
 class FrameTVArtCard extends HTMLElement {
@@ -189,6 +189,10 @@ class FrameTVArtCard extends HTMLElement {
     if (this._pollAppliedTimer) {
       clearTimeout(this._pollAppliedTimer);
       this._pollAppliedTimer = null;
+    }
+    if (this._radiusObserver) {
+      this._radiusObserver.disconnect();
+      this._radiusObserver = null;
     }
   }
 
@@ -754,6 +758,7 @@ class FrameTVArtCard extends HTMLElement {
       const infoDiv = this.querySelector('.ftv-info');
       if (infoDiv) {
         infoDiv.innerHTML = artworkText;
+        this._syncInfoFade(infoDiv);
       }
       
       // Also update background if we now have metadata
@@ -777,8 +782,60 @@ class FrameTVArtCard extends HTMLElement {
       const infoDiv = this.querySelector('.ftv-info');
       if (infoDiv) {
         infoDiv.innerHTML = artworkText;
+        this._syncInfoFade(infoDiv);
       }
     }
+  }
+
+  _syncInfoFade(infoEl) {
+    const wrapEl = this.querySelector('.ftv-progress-wrap');
+    const fadeEl = this.querySelector('.ftv-info-fade');
+    if (!wrapEl) return;
+    requestAnimationFrame(() => {
+      const overflow = wrapEl.scrollHeight > wrapEl.clientHeight + 2;
+      if (fadeEl) fadeEl.style.display = overflow ? '' : 'none';
+      wrapEl.style.cursor = overflow ? 'pointer' : '';
+      wrapEl.dataset.overflows = overflow ? '1' : '';
+      if (overflow && !wrapEl._ftv_scroll_bound) {
+        wrapEl._ftv_scroll_bound = true;
+        wrapEl.addEventListener('scroll', () => {
+          if (!fadeEl) return;
+          const atBottom = wrapEl.scrollTop + wrapEl.clientHeight >= wrapEl.scrollHeight - 4;
+          fadeEl.style.display = atBottom ? 'none' : '';
+        });
+      }
+    });
+  }
+
+  _showInfoOverlay() {
+    const infoDiv = this.querySelector('.ftv-info');
+    const logDiv = this.querySelector('.ftv-refresh-log');
+    const wrapEl = this.querySelector('.ftv-progress-wrap');
+    if (!infoDiv) return;
+    // Fade out the wrap background while overlay is open
+    if (wrapEl) wrapEl.style.background = 'transparent';
+
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:99999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.45);';
+
+    const panel = document.createElement('div');
+    panel.style.cssText = 'position:relative;background:rgba(12,12,12,0.94);border:1px solid rgba(255,255,255,0.15);border-radius:12px;padding:20px 20px 16px;max-width:480px;width:90%;max-height:80vh;overflow-y:auto;color:white;box-shadow:0 12px 40px rgba(0,0,0,0.7);';
+
+    const close = document.createElement('button');
+    close.innerHTML = '&times;';
+    close.style.cssText = 'position:absolute;top:10px;right:12px;background:transparent;border:none;color:rgba(255,255,255,0.5);font-size:22px;cursor:pointer;line-height:1;padding:0;';
+
+    panel.innerHTML = infoDiv.innerHTML + (logDiv && logDiv.innerHTML ? '<div style="margin-top:8px;border-top:1px solid rgba(255,255,255,0.1);padding-top:8px;font-size:0.85em;line-height:1.6;color:rgba(255,255,255,0.65);">' + logDiv.innerHTML + '</div>' : '');
+    panel.prepend(close);
+    overlay.appendChild(panel);
+
+    const dismiss = () => {
+      try { document.body.removeChild(overlay); } catch (_) {}
+      if (wrapEl) wrapEl.style.background = '';
+    };
+    close.addEventListener('click', (e) => { e.stopPropagation(); dismiss(); });
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) dismiss(); });
+    document.body.appendChild(overlay);
   }
 
   _updateBackgroundFromCsv() {
@@ -818,7 +875,6 @@ class FrameTVArtCard extends HTMLElement {
         
         const infoDiv = this.querySelector('.ftv-info');
         if (infoDiv) {
-          infoDiv.style.background = 'rgba(0,0,0,0.5)';
           infoDiv.style.color = 'white';
         }
       }
@@ -880,7 +936,8 @@ class FrameTVArtCard extends HTMLElement {
     const isStandby = isNotInArtMode || this._refreshInProgress || !normalizedFile || normalizedFile === 'standby.png' || normalizedFile === 'unknown' || normalizedFile === 'unavailable' || normalizedFile === 'none';
     this._isStandbyLike = isStandby;
     const hasArtwork = bgUrl !== null;
-    const isCompressed = (this._config.layout_mode || 'compressed') !== 'expanded';
+    const isCompressed = (this._config.layout_mode || 'fixed') !== 'dynamic';
+    this._isFixed = isCompressed;
 
     // Initialize staged selection to baseline on render
     this._currentSelected = Array.isArray(this._currentSelected) && this._dropdownOpen
@@ -908,6 +965,9 @@ class FrameTVArtCard extends HTMLElement {
       }, 100);
     }
 
+    this.style.setProperty('--ha-card-border-radius', '21px');
+    if (isNotInArtMode) this.style.setProperty('--ha-card-box-shadow', 'none');
+
     this.innerHTML = `
       <ha-card>
         <style>
@@ -917,17 +977,57 @@ class FrameTVArtCard extends HTMLElement {
           .ftv-card {
             padding: 12px;
             position: relative;
-            border-radius: var(--ha-card-border-radius, 12px);
-            ${isCompressed ? 'aspect-ratio: 16/9; display: flex; flex-direction: column; box-sizing: border-box;' : ''}
+            border-radius: 21px;
+            ${isCompressed && !isNotInArtMode ? 'aspect-ratio: 16/9; display: flex; flex-direction: column; box-sizing: border-box;' : ''}
             ${isNotInArtMode ? '' : hasArtwork ? `background: linear-gradient(rgba(0,0,0,0.1), rgba(0,0,0,0.1)), url("${bgUrl}"); background-size: cover; background-position: center;` : ''}
           }
           .ftv-header {
+            ${isNotInArtMode ? `
+            display: grid;
+            grid-template-areas: "i n" "i l";
+            grid-template-columns: min-content auto;
+            grid-template-rows: min-content min-content;
+            padding: 0;
+            ` : `
             display: flex;
             align-items: center;
             gap: 10px;
-            padding: 0 0 8px 0;
+            padding: 0;
             margin-bottom: 12px;
             ${hasArtwork ? 'color: white;' : ''}
+            `}
+          }
+          .ftv-title-wrap {
+            display: flex;
+            flex-direction: column;
+            line-height: 1.3;
+          }
+          .ftv-title-wrap > span {
+            font-size: 14px;
+            font-weight: bold;
+            color: var(--primary-text-color);
+          }
+          .ftv-name {
+            grid-area: n;
+            font-size: 1em;
+            font-weight: 500;
+            color: var(--primary-text-color);
+            align-self: end;
+            justify-self: start;
+            margin-left: 6px;
+            margin-bottom: 2px;
+            line-height: 1.1;
+          }
+          .ftv-subtitle {
+            grid-area: l;
+            font-size: 0.85em;
+            font-weight: bolder;
+            filter: opacity(40%);
+            align-self: start;
+            justify-self: start;
+            margin-left: 6px;
+            margin-top: 0px;
+            line-height: 1.1;
           }
           .ftv-header .spacer { flex: 1; }
           .ftv-gear {
@@ -971,15 +1071,16 @@ class FrameTVArtCard extends HTMLElement {
             width: 42px;
             height: 42px;
             border-radius: 50%;
-            background: rgba(var(--rgb-primary-color, 3, 169, 244), 0.2);
+            background: ${isNotInArtMode ? 'rgba(var(--color-theme),0.05)' : 'rgba(var(--rgb-primary-color, 3, 169, 244), 0.2)'};
             display: flex;
             align-items: center;
             justify-content: center;
             flex-shrink: 0;
+            ${isNotInArtMode ? 'grid-area: i; place-self: center;' : ''}
           }
           .ftv-icon-wrap ha-icon {
             --mdc-icon-size: 24px;
-            color: var(--primary-color, #03a9f4);
+            color: ${isNotInArtMode ? 'rgba(var(--color-theme),0.2)' : 'var(--primary-color, #03a9f4)'};
           }
           .ftv-controls {
             border-radius: 8px;
@@ -1094,15 +1195,14 @@ class FrameTVArtCard extends HTMLElement {
             justify-content: center;
           }
           .ftv-progress-wrap {
-            ${hasArtwork ? 'background: rgba(0,0,0,0.5); border-radius: 8px;' : ''}
-            ${isCompressed ? 'flex: 1; min-height: 0; overflow: hidden; position: relative; display: flex; flex-direction: column;' : (hasArtwork ? 'overflow: hidden;' : '')}
+            ${hasArtwork ? 'background: rgba(0,0,0,0.55); border-radius: 8px; transition: background 0.25s;' : ''}
+            ${isCompressed ? 'flex: 1; min-height: 0; overflow-y: auto; position: relative; padding-bottom: 8px;' : (hasArtwork ? 'overflow: hidden;' : '')}
           }
           .ftv-info {
             display: block;
             width: 100%;
             box-sizing: border-box;
             padding: 12px;
-            ${isCompressed ? 'flex: 1; min-height: 0; overflow-y: auto;' : ''}
             ${hasArtwork ? 'color: white;' : ''}
           }
           .ftv-refresh-log {
@@ -1113,11 +1213,12 @@ class FrameTVArtCard extends HTMLElement {
           .ftv-refresh-log:empty { display: none; }
           ${isCompressed ? `
           .ftv-info-fade {
+            display: none;
             position: absolute;
             bottom: 0;
             left: 0;
             right: 0;
-            height: 56px;
+            height: 48px;
             background: linear-gradient(to bottom, transparent, ${hasArtwork && !isNotInArtMode ? 'rgba(0,0,0,0.85)' : 'var(--ha-card-background-color, var(--card-background-color, #fff))'});
             pointer-events: none;
           }` : ''}
@@ -1293,7 +1394,13 @@ class FrameTVArtCard extends HTMLElement {
             <div class="ftv-icon-wrap">
               <ha-icon icon="${this._config.icon}"></ha-icon>
             </div>
-            <span>${this._config.title}</span>
+            ${isNotInArtMode ? `
+            <span class="ftv-name">${this._config.title}</span>
+            <span class="ftv-subtitle">TV is not in art mode</span>
+            ` : `
+            <div class="ftv-title-wrap">
+              <span>${this._config.title}</span>
+            </div>
             <span class="spacer"></span>
             ${this._slideshowMode === 'override' ? `<button class="ftv-override-badge" id="ftv-override-badge" title="Override active — click to clear"><span class="ftv-badge-dot"></span>Override</button>` : ''}
             <button class="ftv-grid-btn${this._overridePanelOpen ? ' active' : ''}" id="ftv-grid-btn" title="Slideshow override">
@@ -1302,7 +1409,9 @@ class FrameTVArtCard extends HTMLElement {
             <button class="ftv-gear" id="ftv-gear" title="Settings">
               <ha-icon icon="mdi:cog"></ha-icon>
             </button>
+            `}
           </div>
+          ${isNotInArtMode ? `` : `
           <div class="ftv-override-popup${this._overridePanelOpen ? ' open' : ''}" id="ftv-override-popup">
             <div class="ftv-panel-header">Slideshow</div>
             <div class="ftv-op-settings">
@@ -1360,11 +1469,14 @@ class FrameTVArtCard extends HTMLElement {
               </div>
               <div class="ftv-status" id="ftv-status">${this._statusMessage || ''}</div>
           </div>
+          `}
+          ${isNotInArtMode ? '' : `
           <div class="ftv-progress-wrap">
             <div class="ftv-info">${artworkText}</div>
             <div class="ftv-refresh-log"></div>
             ${isCompressed ? '<div class="ftv-info-fade"></div>' : ''}
           </div>
+          `}
           <div class="ftv-settings" id="ftv-settings">
             <div class="ftv-panel-header">Settings</div>
             <div class="ftv-field">
@@ -1471,6 +1583,16 @@ class FrameTVArtCard extends HTMLElement {
         }
       } catch (_) {}
     };
+    // Info expand — tap progress-wrap to open floating overlay (fixed mode, only when content overflows)
+    if (this._isFixed) {
+      const progressWrap = this.querySelector('.ftv-progress-wrap');
+      if (progressWrap) {
+        progressWrap.addEventListener('click', () => {
+          if (progressWrap.dataset.overflows) this._showInfoOverlay();
+        });
+      }
+    }
+
     // Grid (override) button — toggle the override popup
     // The amber Override badge also opens the panel on click
     const gridBtn = this.querySelector('#ftv-grid-btn');
@@ -1770,11 +1892,12 @@ class FrameTVArtCard extends HTMLElement {
     if (this._pollAppliedTimer) clearTimeout(this._pollAppliedTimer);
     this._pollAppliedTimer = setTimeout(pollApplied, 2000);
 
-    // Event handlers
+    // Event handlers — only exist when in art mode
     const trigger = this.querySelector('#ftv-trigger');
     const dropdown = this.querySelector('#ftv-dropdown');
     const dropdownWrap = this.querySelector('.ftv-dropdown-wrap');
-    
+
+    if (trigger && dropdown) {
     trigger.addEventListener('click', (e) => {
       e.stopPropagation();
       this._dropdownOpen = !this._dropdownOpen;
@@ -1813,7 +1936,8 @@ class FrameTVArtCard extends HTMLElement {
       });
     });
 
-    this.querySelector('#ftv-clear').addEventListener('click', (e) => {
+    const clearBtnEl = this.querySelector('#ftv-clear');
+    if (clearBtnEl) clearBtnEl.addEventListener('click', (e) => {
       e.stopPropagation();
       if (this._isStandbyLike || this._refreshInProgress) return;
       // Stage-only clear; apply must be clicked to publish
@@ -1849,8 +1973,11 @@ class FrameTVArtCard extends HTMLElement {
         applyBtn.disabled = true;
       });
     }
+    } // end if (trigger && dropdown)
 
     // Reverted: keep default sizing behavior (background-size: cover) without dynamic min-height
+
+
 
       }
 
@@ -1967,7 +2094,7 @@ class FrameTVArtCard extends HTMLElement {
     }
   }
 
-console.info('%c FRAME-TV-ART-CARD %c v0.2.1 ', 'color: white; background: #03a9f4; font-weight: bold;', '');
+console.info('%c FRAME-TV-ART-CARD %c v0.2.1-beta.1 ', 'color: white; background: #03a9f4; font-weight: bold;', '');
 
 // Register custom element so Lovelace can use <frame-tv-art-card>
 try {
