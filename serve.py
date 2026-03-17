@@ -52,13 +52,17 @@ class FallbackHandler(SimpleHTTPRequestHandler):
         return current
 
     def _read_ui_mqtt(self):
-        # Build UI MQTT defaults from overrides.env if present, else from process env
+        # Build UI MQTT defaults from overrides.env if present, else from process env.
+        # Uses SAMSUNG_TV_ART_MQTT_WS_HOST (dedicated browser WebSocket host) — NOT MQTT_HOST
+        # which may be a Docker-internal service name unreachable from browsers.
+        # If no WS host is explicitly configured, return an empty broker so the browser
+        # defaults to location.hostname (the server the user accessed the UI on).
         ov = self._read_overrides()
-        host = ov.get('SAMSUNG_TV_ART_MQTT_HOST') or os.environ.get('SAMSUNG_TV_ART_MQTT_HOST') or os.environ.get('HOSTNAME') or 'localhost'
+        host = ov.get('SAMSUNG_TV_ART_MQTT_WS_HOST') or os.environ.get('SAMSUNG_TV_ART_MQTT_WS_HOST') or ''
         ws_port = ov.get('SAMSUNG_TV_ART_MQTT_WS_PORT') or os.environ.get('SAMSUNG_TV_ART_MQTT_WS_PORT') or '9001'
         user = ov.get('SAMSUNG_TV_ART_MQTT_USERNAME') or os.environ.get('SAMSUNG_TV_ART_MQTT_USERNAME') or ''
         pw = ov.get('SAMSUNG_TV_ART_MQTT_PASSWORD') or os.environ.get('SAMSUNG_TV_ART_MQTT_PASSWORD') or ''
-        broker = f"ws://{host}:{ws_port}"
+        broker = f"ws://{host}:{ws_port}" if host else ''
         return {'broker': broker, 'username': user, 'password': pw}
 
     def _write_ui_mqtt(self, data):
@@ -79,7 +83,7 @@ class FallbackHandler(SimpleHTTPRequestHandler):
                 host_val, ws_port_val = None, None
         updates = {}
         if host_val:
-            updates['SAMSUNG_TV_ART_MQTT_HOST'] = host_val
+            updates['SAMSUNG_TV_ART_MQTT_WS_HOST'] = host_val
         if ws_port_val:
             updates['SAMSUNG_TV_ART_MQTT_WS_PORT'] = ws_port_val
         updates['SAMSUNG_TV_ART_MQTT_USERNAME'] = username
@@ -97,6 +101,7 @@ class FallbackHandler(SimpleHTTPRequestHandler):
             'SAMSUNG_TV_ART_TV_IP',
             # UI MQTT defaults persisted via overrides
             'SAMSUNG_TV_ART_MQTT_HOST',
+            'SAMSUNG_TV_ART_MQTT_WS_HOST',
             'SAMSUNG_TV_ART_MQTT_WS_PORT',
             'SAMSUNG_TV_ART_MQTT_USERNAME',
             'SAMSUNG_TV_ART_MQTT_PASSWORD',

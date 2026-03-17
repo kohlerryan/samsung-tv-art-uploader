@@ -78,16 +78,17 @@
     .line { font-size: .9em; color: rgba(255,255,255,.7); line-height: 1.4; margin-top: 4px; }
     .bg { width: 100%; border-radius: 8px; background-color: #0d0c0b; overflow: hidden; border: 1px solid #3a2f2a; }
     .bg img { width: 100%; height: auto; display: block; border-radius: 8px; }
-    #refresh-log { margin-top: 10px; font-size: 0.85em; color: #b6aba4; line-height: 1.6; }
+    #refresh-log { margin-top: 10px; font-size: 0.85em; line-height: 1.6; max-height: 220px; overflow-y: auto; }
     /* Now Playing layout: flex column filling the full tab-content height */
     #viewNowPlaying { flex: 1; min-height: 0; display: flex; flex-direction: column; }
     #viewNowPlaying .bg   { order: 1; flex-shrink: 0; }
     #viewNowPlaying .info-wrap { order: 2; margin-top: 12px; }
     #viewNowPlaying #refresh-log { order: 3; flex-shrink: 0; }
-    /* Standby mode: text above image; info-wrap and bg both shrink to content — no flex growth */
+    /* Standby mode: text above image; info-wrap shrinks, log + bg fill the rest */
     #viewNowPlaying.standby-mode .info-wrap { order: 1; margin-top: 0; flex: 0 0 auto; }
-    #viewNowPlaying.standby-mode .info { height: auto; }
-    #viewNowPlaying.standby-mode .bg   { order: 2; margin-top: 10px; }
+    #viewNowPlaying.standby-mode .info { height: auto; color: white; }
+    #viewNowPlaying.standby-mode .bg   { order: 2; margin-top: 10px; flex-shrink: 0; }
+    #viewNowPlaying.standby-mode #refresh-log { order: 3; flex: 1; min-height: 0; max-height: none; overflow-y: auto; margin-top: 6px; }
     /* Info section: .info-wrap is the flex child that takes remaining space; .info scrolls */
     .info-wrap { flex: 1; min-height: 0; }
     .info { height: 100%; overflow-y: auto; }
@@ -275,28 +276,62 @@
         <div id="viewNowPlaying">
           <div class="bg" id="bg"></div>
           <div class="info-wrap">
-            <div class="info" id="info"></div>
+            <div class="info" id="info"><span style="color:rgba(255,255,255,0.35); font-size:0.9em;">Waiting for TV data…</span></div>
           </div>
           <div id="refresh-log"></div>
         </div>
         <div id="viewSettings" style="display:none; flex: 1; min-height: 0; overflow-y: auto;">
           <h1>Settings</h1>
-          <div class="hint">MQTT WebSocket defaults come from env.json and persisted overrides; changes here are saved.</div>
+          <div style="font-size:13px; font-weight:600; color:#c9b89a; margin-bottom:4px;">MQTT Connection</div>
+          <div class="hint">Changes here are saved and reconnect the browser. Use the HA card settings to also update the backend TCP port (default 1883).</div>
           <div class="row" style="margin-top:8px; align-items: stretch; gap: 6px;">
-            <input id="broker" placeholder="ws://host:9001" style="flex:2; padding:10px; background:#2a2623; color:#f2eee9; border:1px solid #4a3d37; border-radius:8px;" />
-            <input id="user" placeholder="username (optional)" style="flex:1; padding:10px; background:#2a2623; color:#f2eee9; border:1px solid #4a3d37; border-radius:8px;" />
-            <input id="pass" type="password" placeholder="password (optional)" style="flex:1; padding:10px; background:#2a2623; color:#f2eee9; border:1px solid #4a3d37; border-radius:8px;" />
-            <button id="connect">Connect</button>
+            <div style="display:flex; flex-direction:column; flex:2; gap:4px;">
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span style="font-size:11px; color:#b6aba4;">MQTT broker address</span>
+                <span id="mqtt-status" style="font-size:11px; color:#b6aba4;"></span>
+              </div>
+              <input id="mqtt-host" placeholder="e.g. 10.0.0.1" style="padding:10px; background:#2a2623; color:#f2eee9; border:1px solid #4a3d37; border-radius:8px;" />
+            </div>
+            <div style="display:flex; flex-direction:column; flex:0 0 110px; gap:4px;">
+              <span style="font-size:11px; color:#b6aba4;">WebSocket port</span>
+              <input id="mqtt-ws-port" type="number" placeholder="9001" style="padding:10px; background:#2a2623; color:#f2eee9; border:1px solid #4a3d37; border-radius:8px;" />
+            </div>
+            <div id="cred-server-notice" style="display:none; flex:2; align-self:flex-end; align-items:center; gap:8px; padding:9px 12px; background:#1a2a1a; border:1px solid #3a5a3a; border-radius:8px; font-size:12px; color:#6abf69;">
+              <span>&#128274; Using server credentials</span>
+              <button id="cred-override-btn" style="font-size:11px; padding:3px 8px; margin-left:auto;">Override</button>
+            </div>
+            <div id="cred-override-wrap" style="display:contents;">
+              <div style="display:flex; flex-direction:column; flex:1; gap:4px;">
+                <span style="font-size:11px; color:#b6aba4;">Username (optional)</span>
+                <input id="user" placeholder="" style="padding:10px; background:#2a2623; color:#f2eee9; border:1px solid #4a3d37; border-radius:8px;" />
+              </div>
+              <div style="display:flex; flex-direction:column; flex:1; gap:4px;">
+                <span style="font-size:11px; color:#b6aba4;">Password (optional)</span>
+                <input id="pass" type="password" placeholder="" style="padding:10px; background:#2a2623; color:#f2eee9; border:1px solid #4a3d37; border-radius:8px;" />
+              </div>
+            </div>
+            <button id="connect" style="align-self:flex-end;">Connect</button>
           </div>
-          <div class="row" style="margin-top:10px; align-items:center;">
+          <div style="font-size:13px; font-weight:600; color:#c9b89a; margin-top:14px; margin-bottom:4px;">Display</div>
+          <div class="row" style="margin-top:4px; align-items:center;">
             <label style="display:flex; align-items:center; gap:8px; color:#b6aba4; font-size:13px; cursor:pointer;">
               <input type="checkbox" id="preload-toggle" style="width:16px; height:16px; cursor:pointer; accent-color:#2f7fbf;">
               Preload thumbnails (fetch all images on open instead of lazily)
             </label>
           </div>
-          <div style="margin-top:14px;">
-            <div class="hint" style="margin-bottom:6px;">Collections list &mdash; one git URL per line (used by &ldquo;Update &amp; Refresh&rdquo;). Lines starting with # are comments.</div>
-            <textarea id="collections-list-input" spellcheck="false" style="width:100%; box-sizing:border-box; min-height:140px; padding:10px; background:#2a2623; color:#f2eee9; border:1px solid #4a3d37; border-radius:8px; font-family:monospace; font-size:12px; resize:vertical;"></textarea>
+          <div style="margin-top:14px; font-size:13px; font-weight:600; color:#c9b89a; margin-bottom:5px;">Collections <span style="font-weight:normal; font-size:11px; color:#8a7a6e;">(used by “Update &amp; Refresh”)</span></div>
+          <div style="margin-top:0;">
+            <div style="font-size:11px; font-weight:600; color:#8a7a6e; text-transform:uppercase; letter-spacing:0.06em; border-left:2px solid #4a3d37; padding-left:7px; margin-bottom:5px;">Official Collections <span style="font-weight:normal; letter-spacing:0;">(github.com/kohlerryan)</span></div>
+            <div style="display:flex; gap:6px; align-items:center; margin-bottom:6px; flex-wrap:wrap;">
+              <input type="text" id="coll-search" placeholder="Filter artists…" style="flex:1; min-width:130px; padding:5px 8px; background:#2a2623; color:#f2eee9; border:1px solid #4a3d37; border-radius:6px; font-size:12px;">
+              <button id="coll-select-all" style="font-size:12px; padding:4px 9px;">Select All</button>
+              <button id="coll-deselect-all" style="font-size:12px; padding:4px 9px;">Deselect All</button>
+            </div>
+            <div id="official-collections-grid" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(160px, 1fr)); gap:1px 10px; padding:8px 10px; background:#2a2623; border:1px solid #4a3d37; border-radius:8px; max-height:220px; overflow-y:auto;"></div>
+            <div style="margin-top:12px;">
+              <div style="font-size:11px; font-weight:600; color:#8a7a6e; text-transform:uppercase; letter-spacing:0.06em; border-left:2px solid #4a3d37; padding-left:7px; margin-bottom:4px;">Custom Repositories <span style="font-weight:normal; letter-spacing:0;">(one git URL per line)</span></div>
+              <textarea id="collections-custom-input" spellcheck="false" placeholder="https://github.com/your-org/Your_Artist.git" style="width:100%; box-sizing:border-box; min-height:72px; padding:10px; background:#2a2623; color:#f2eee9; border:1px solid #4a3d37; border-radius:8px; font-family:monospace; font-size:12px; resize:vertical;"></textarea>
+            </div>
             <div style="display:flex; gap:8px; margin-top:6px; align-items:center;">
               <button id="collections-list-save" disabled style="opacity:0.6;">Save List</button>
               <span id="collections-list-msg" class="hint"></span>
@@ -360,7 +395,7 @@
           <div id="sl-msg" class="hint" style="margin-top:8px;"></div>
         </div>
       </div>
-      <span class="version-tag">v0.2.3-beta.1</span>
+      <span class="version-tag">v0.2.3-beta.2</span>
     </div>
   </div>
   <script>
@@ -386,16 +421,40 @@
       return env || {};
     }
     function loadSettings(env = {}) {
-      const defBroker = env.broker || `ws://${location.hostname}:9001`;
-      const s = {
-        broker: qs.get('broker') || localStorage.getItem('ftv_broker') || defBroker,
-        username: qs.get('username') || localStorage.getItem('ftv_username') || env.username || '',
-        password: qs.get('password') || localStorage.getItem('ftv_password') || env.password || '',
+      // Parse env.broker (ws://host:port) — empty string if not configured so it doesn't shadow localStorage
+      let envHost = '', envWsPort = '';
+      try {
+        if (env.broker) {
+          const _u = new URL(env.broker.includes('://') ? env.broker : 'ws://' + env.broker);
+          envHost = _u.hostname || '';
+          envWsPort = _u.port || '';
+        }
+      } catch (_) {}
+      // Backward-compat: parse old ftv_broker from localStorage
+      let legacyHost = '', legacyPort = '';
+      try {
+        const _old = localStorage.getItem('ftv_broker') || '';
+        if (_old) {
+          const _u = new URL(_old.includes('://') ? _old : 'ws://' + _old);
+          legacyHost = _u.hostname || '';
+          legacyPort = _u.port || '';
+        }
+      } catch (_) {}
+      // Priority for host/port: query param > server env (overrides.env) > localStorage > legacy > browser defaults
+      // Priority for credentials: query param > server env > localStorage.
+      // Server env (/api/ui-mqtt) is written ONLY on a successful MQTT connect (on('connect')), so it always
+      // holds the last-known-good credentials. localStorage is a fallback for when the server is unreachable.
+      return {
+        host: qs.get('mqttHost') || envHost || localStorage.getItem('ftv_mqtt_host') || legacyHost || location.hostname,
+        wsPort: qs.get('mqttWsPort') || envWsPort || localStorage.getItem('ftv_mqtt_ws_port') || legacyPort || '9001',
+        username: qs.get('username') || env.username || localStorage.getItem('ftv_username') || '',
+        password: qs.get('password') || env.password || localStorage.getItem('ftv_password') || '',
       };
-      return s;
     }
-    function saveSettings(b, u, p) {
-      localStorage.setItem('ftv_broker', b || '');
+    function saveSettings(host, wsPort, u, p) {
+      localStorage.setItem('ftv_mqtt_host', host || '');
+      localStorage.setItem('ftv_mqtt_ws_port', wsPort || '');
+      localStorage.setItem('ftv_broker', `ws://${host}:${wsPort}`);
       localStorage.setItem('ftv_username', u || '');
       localStorage.setItem('ftv_password', p || '');
     }
@@ -410,17 +469,110 @@
       });
     }
 
+    const $mqttStatus = document.getElementById('mqtt-status');
+    function _setMqttStatus(msg, color) {
+      if ($mqttStatus) { $mqttStatus.textContent = msg; $mqttStatus.style.color = color || '#b6aba4'; }
+    }
+
     let client = null;
+    let refreshInProgress = false;
+    let refreshLog = [];
+    let lastAttrs = null;
+    let applyPending = false;
+    let _applyPendingTimer = null;
+    let _refreshSafetyTimer = null;
+    let _updateSettingsBtnState = null;
+    function stopRefreshSpinner() {
+      if ($refresh) { $refresh.classList.remove('spinning'); }
+      updateButtons();
+    }
     function connectMqtt(broker, username, password) {
-      try { if (client) client.end(true); } catch (_) {}
-      client = mqtt.connect(broker, { username, password });
+      console.log('[MQTT] connecting to', broker, 'user:', username || '(none)');
+      _setMqttStatus('● Connecting…', '#b6aba4');
+      // Clear any stale refresh lock so setInfo() is not blocked when retained
+      // TOPIC_ATTR arrives from the new connection.
+      try { sessionStorage.removeItem('ftvRefreshLog'); sessionStorage.removeItem('ftvRefreshActive'); } catch (_) {}
+      try { if (_refreshSafetyTimer) { clearTimeout(_refreshSafetyTimer); _refreshSafetyTimer = null; } } catch (_) {}
+      refreshInProgress = false;
+      refreshLog = [];
+      // NOTE: do NOT clear setInfo._lastKey here. The old client may still have
+      // queued on('message') callbacks in the JS event loop that fire after
+      // client.end(true) returns. If we clear _lastKey now and a stale retained
+      // TOPIC_ATTR fires next, it will set _lastKey to the artwork key. Then the
+      // new client's identical retained message is skipped → Now Showing stays
+      // as placeholder. Instead, clear _lastKey inside on('connect') where the
+      // new client is definitively established.
+      try { if (client) { client.removeAllListeners(); client.end(true); } } catch (_) {}
+      client = mqtt.connect(broker, { username, password, reconnectPeriod: 5000 });
       client.on('connect', () => {
-        client.subscribe([TOPIC_ATTR, TOPIC_STATE, TOPIC_COLL_ATTR, TOPIC_SELECTED, TOPIC_SETTINGS_ATTR, TOPIC_SLIDESHOW_STATE, TOPIC_SLIDESHOW_ATTR, TOPIC_SLIDESHOW_AVAIL, `${TOPIC_ACK_PREFIX}/#`]);
+        console.log('[MQTT] connected to', broker);
+        _setMqttStatus('● Connected', '#6abf69');
+        // Now the new client is established — safe to clear the dedup key so the
+        // first retained TOPIC_ATTR from this subscription always renders.
+        setInfo._lastKey = null;
+        // Persist the credentials that actually worked. Do this ONLY here (not
+        // eagerly in initSettings) so we never overwrite correct credentials with
+        // partially-resolved data that might have an empty password.
+        try {
+          const _u = new URL(broker);
+          saveSettings(_u.hostname, _u.port || '9001', username, password);
+          console.log('[SETTINGS] credentials saved to localStorage after successful connect');
+        } catch (_) {}
+        // Also persist to server so other browsers / devices can auto-connect
+        // without the user needing to re-enter credentials.
+        fetch('/api/ui-mqtt', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ broker: broker, username: username, password: password })
+        }).catch(() => {});
+        client.subscribe([TOPIC_ATTR, TOPIC_STATE, TOPIC_COLL_ATTR, TOPIC_SELECTED, TOPIC_SETTINGS_ATTR, TOPIC_SLIDESHOW_STATE, TOPIC_SLIDESHOW_ATTR, TOPIC_SLIDESHOW_AVAIL, TOPIC_LOG, `${TOPIC_CMD_PREFIX}/collections/refresh`, `${TOPIC_ACK_PREFIX}/#`]);
         requestSlideshowAvailable();
         scheduleAvailableRetry();
+        // Retained messages arrive as a burst after subscribe. Defer sync so the
+        // trigger text reflects the fully-settled state after all messages land.
+        setTimeout(() => { syncTriggerText(); updateButtons(); }, 600);
+      });
+      client.on('error', (err) => {
+        const _errMsg = err && err.message ? err.message : String(err);
+        console.error('[MQTT] error:', err);
+        _setMqttStatus(`● Error: ${_errMsg}`, '#e06c75');
+        // Stop retrying immediately on auth failures (wrong password etc).
+        // For other errors (network drop, container restart) let reconnectPeriod handle it.
+        if (/not authorized|bad user|bad.username|connection refused/i.test(_errMsg)) {
+          try { client.end(true); } catch(_) {}
+        }
+      });
+      client.on('close', () => {
+        console.warn('[MQTT] connection closed');
+        _setMqttStatus('● Disconnected', '#e5c07b');
+      });
+      client.on('offline', () => {
+        console.warn('[MQTT] client offline');
+        _setMqttStatus('● Offline', '#e5c07b');
       });
       client.on('message', (topic, payload) => {
         try {
+          if (topic === `${TOPIC_CMD_PREFIX}/collections/refresh`) {
+            if (!refreshInProgress) {
+              refreshInProgress = true;
+              refreshLog = ['Refresh request received — switching TV to standby...'];
+              const standbyUrl = `${location.origin}/app/standby.default.png`;
+              $bg.innerHTML = `<img src="${standbyUrl}" alt="standby">`;
+              if ($refresh) { $refresh.disabled = true; $refresh.classList.add('spinning'); $refresh.style.opacity = '0.7'; }
+              renderRefreshLog();
+            }
+            return;
+          }
+          if (topic === TOPIC_LOG) {
+            const line = payload.toString().trim();
+            if (line) {
+              logLines.push(line);
+              if (logLines.length > LOG_MAX_LINES) logLines.shift();
+              // Show live in #refresh-log only when in standby and not in a curated refresh
+              if (!refreshInProgress && slideshowStandby) renderLiveLog();
+            }
+            return;
+          }
           if (topic === TOPIC_COLL_ATTR) {
             const data = JSON.parse(payload.toString() || '{}');
             console.log('[collections] received:', JSON.stringify(data));
@@ -495,7 +647,7 @@
                     // First message: lock and seed log
                     refreshInProgress = true;
                     if ($refresh) { $refresh.disabled = true; $refresh.classList.add('spinning'); $refresh.style.opacity = '0.7'; }
-                    refreshLog = ['Please stand by as artwork is loaded...'];
+                    refreshLog = [];
                     const standbyUrl = `${location.origin}/app/standby.default.png`;
                     $bg.innerHTML = `<img src="${standbyUrl}" alt="standby">`;
                   }
@@ -554,6 +706,7 @@
     const TOPIC_SLIDESHOW_STATE = 'frame_tv/slideshow/state';
     const TOPIC_SLIDESHOW_ATTR  = 'frame_tv/slideshow/attributes';
     const TOPIC_SLIDESHOW_AVAIL = 'frame_tv/slideshow/available';
+    const TOPIC_LOG = 'frame_tv/log';
     const TOPIC_CMD_PREFIX = 'frame_tv/cmd';
     const $refresh = document.getElementById('refresh');
     const TOPIC_ACK_PREFIX = 'frame_tv/ack';
@@ -705,19 +858,22 @@
       return { artist: null, title: raw, year: null };
     }
 
-    let refreshInProgress = false;
-    let lastAttrs = null;
-    let refreshLog = [];
-    let _refreshSafetyTimer = null;
-    let _updateSettingsBtnState = null;
-    let applyPending = false;
-    let _applyPendingTimer = null;
+    // Rolling log buffer (frame_tv/log)
+    const LOG_MAX_LINES = 60;
+    let logLines = [];
 
-    function stopRefreshSpinner() {
-      if ($refresh) {
-        $refresh.classList.remove('spinning');
-      }
-      updateButtons(); // re-evaluate all button states including refresh
+    function logLineHtml(line) {
+      const l = line.toLowerCase();
+      const color = l.includes(':error:') || l.startsWith('error') ? '#ff6b6b'
+                  : l.includes(':warning:') || l.startsWith('warning') ? '#ffd166'
+                  : '#6bcb77';
+      return `<div style="color:${color}">${escapeHtml(line)}</div>`;
+    }
+    function renderLiveLog() {
+      const $log = document.getElementById('refresh-log');
+      if (!$log) return;
+      $log.innerHTML = logLines.map(logLineHtml).join('');
+      requestAnimationFrame(() => { $log.scrollTop = $log.scrollHeight; });
     }
 
     function resetApplyBtn() {
@@ -734,22 +890,22 @@
       const $np = document.getElementById('viewNowPlaying');
       if ($np) $np.classList.add('standby-mode');
       const $log = document.getElementById('refresh-log');
-      $info.innerHTML = refreshLog.length ? `<div>${refreshLog[0]}</div>` : '';
-      if ($log) $log.innerHTML = refreshLog.slice(1).map(l => `<div>${l}</div>`).join('');
+      $info.innerHTML = '<div style="color:white">Refresh in progress\u2026</div>';
+      if ($log) { $log.innerHTML = refreshLog.map(logLineHtml).join(''); requestAnimationFrame(() => { $log.scrollTop = $log.scrollHeight; }); }
       try { sessionStorage.setItem('ftvRefreshLog', JSON.stringify({ log: refreshLog, ts: Date.now() })); sessionStorage.setItem('ftvRefreshActive', '1'); } catch(_) {}
     }
-    // Restore refresh log if page was refreshed while a sync was in progress (max 15 min TTL)
+    // Restore refresh log if page was refreshed while a sync was in progress (max 2 min TTL)
     try {
       const _raw = sessionStorage.getItem('ftvRefreshLog');
       if (_raw && sessionStorage.getItem('ftvRefreshActive')) {
         const _entry = JSON.parse(_raw);
         const _age = Date.now() - (_entry.ts || 0);
-        if (_age < 15 * 60 * 1000) {
+        if (_age < 2 * 60 * 1000) {
           refreshLog = _entry.log || [];
           refreshInProgress = true;
           if ($bg) $bg.innerHTML = `<img src="${location.origin}/app/standby.default.png" alt="standby">`;
           renderRefreshLog();
-          // Safety valve: if no new refresh ack arrives within 30s the sync is
+          // Safety valve: if no new refresh ack arrives within 8s the sync is
           // already done — clear the stale state so the UI recovers automatically.
           _refreshSafetyTimer = setTimeout(() => {
             if (refreshInProgress) {
@@ -762,7 +918,7 @@
               if ($log) $log.innerHTML = '';
               setInfo(lastAttrs || {});
             }
-          }, 30000);
+          }, 8000);
         } else {
           sessionStorage.removeItem('ftvRefreshLog'); sessionStorage.removeItem('ftvRefreshActive');
         }
@@ -806,6 +962,7 @@
         $bg.style.background = '';
         if ($np) $np.classList.add('standby-mode');
         t = 'Please stand by as artwork is loaded...';
+        renderLiveLog();
       } else {
         $bg.style.background = '';
         if ($np) $np.classList.remove('standby-mode');
@@ -854,37 +1011,55 @@
     }
 
     // Wire up settings UI
-    const $broker = document.getElementById('broker');
+    const $mqttHost = document.getElementById('mqtt-host');
+    const $mqttWsPort = document.getElementById('mqtt-ws-port');
     const $user = document.getElementById('user');
     const $pass = document.getElementById('pass');
     const $connect = document.getElementById('connect');
     (async function initSettings(){
       const env = await loadEnvDefaults();
       const s = loadSettings(env);
+      console.log('[SETTINGS] env from server:', { broker: env.broker || '', username: env.username || '', password: env.password ? '***' : '(empty)' });
+      console.log('[SETTINGS] localStorage:', { host: localStorage.getItem('ftv_mqtt_host'), port: localStorage.getItem('ftv_mqtt_ws_port'), username: localStorage.getItem('ftv_username'), password: localStorage.getItem('ftv_password') ? '***' : '(empty)' });
+      console.log('[SETTINGS] resolved:', { host: s.host, wsPort: s.wsPort, username: s.username, password: s.password ? '***' : '(empty)' });
+      // Do NOT eagerly save here. If s.password resolved as empty (e.g.
+      // /api/ui-mqtt was unreachable this load), calling saveSettings() would
+      // overwrite a previously-correct localStorage password with ''. Credentials
+      // are saved only in on('connect') where they are known to actually work.
       // Initialize empty options; will be filled by MQTT
       options = [];
       renderOptions();
       syncTriggerText();
       updateButtons();
-      $broker.value = s.broker;
+      $mqttHost.value = s.host;
+      $mqttWsPort.value = s.wsPort;
       $user.value = s.username;
       $pass.value = s.password;
-      connectMqtt(s.broker, s.username, s.password);
+      // If server has credentials configured, hide the input fields behind a notice
+      const $credNotice = document.getElementById('cred-server-notice');
+      const $credWrap   = document.getElementById('cred-override-wrap');
+      const $credBtn    = document.getElementById('cred-override-btn');
+      if (env.username && $credNotice && $credWrap) {
+        $credNotice.style.display = 'flex';
+        $credWrap.style.display = 'none';
+      }
+      if ($credBtn) {
+        $credBtn.addEventListener('click', () => {
+          if ($credNotice) $credNotice.style.display = 'none';
+          if ($credWrap) $credWrap.style.display = 'contents';
+          if ($user) $user.focus();
+        });
+      }
+      connectMqtt(`ws://${s.host}:${s.wsPort}`, s.username, s.password);
     })();
-    $connect.onclick = async () => {
-      const b = $broker.value.trim();
+    $connect.onclick = () => {
+      const h = $mqttHost.value.trim();
+      const wp = $mqttWsPort.value.trim() || '9001';
       const u = $user.value.trim();
       const p = $pass.value;
-      saveSettings(b, u, p);
-      // Persist to container (in /data) so defaults survive browser/localStorage clearing
-      try {
-        await fetch('/api/ui-mqtt', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ broker: b, username: u, password: p })
-        });
-      } catch (_) { /* ignore */ }
-      connectMqtt(b, u, p);
+      // Do not save credentials here — only save in on('connect') where we know they work.
+      // on('connect') saves to both localStorage and the server (/api/ui-mqtt).
+      connectMqtt(`ws://${h}:${wp}`, u, p);
     };
 
     // Dropdown open/close
@@ -909,6 +1084,8 @@
         $refresh.disabled = true;
         $refresh.style.opacity = '0.7';
         slideshowUserRefreshPending = true;
+        updateButtons();
+        updateGridLock();
         client.publish(`${TOPIC_CMD_PREFIX}/collections/refresh`, JSON.stringify({ req_id: Date.now() }), { qos: 1, retain: false });
       };
     }
@@ -1041,6 +1218,11 @@
       try {
         envBaseline = attrs || {};
         $tvIp.value = attrs.SAMSUNG_TV_ART_TV_IP || '';
+        // Pre-populate MQTT host from backend settings if not already set by user
+        if ($mqttHost && !$mqttHost.value && attrs.SAMSUNG_TV_ART_MQTT_HOST)
+          $mqttHost.value = attrs.SAMSUNG_TV_ART_MQTT_HOST;
+        if ($mqttWsPort && !$mqttWsPort.value && attrs.SAMSUNG_TV_ART_MQTT_WS_PORT)
+          $mqttWsPort.value = attrs.SAMSUNG_TV_ART_MQTT_WS_PORT;
         markEnvDirty();
         // Populate slideshow fields from env attrs
         const $slMaxU = document.getElementById('sl-max-uploads');
@@ -1081,43 +1263,163 @@
     };
 
     // --- Collections list editor ---
-    const $collListInput = document.getElementById('collections-list-input');
+    const OFFICIAL_COLLECTIONS = [
+      { repo: 'Abbott_Handerson_Thayer',       label: 'Abbott Handerson Thayer' },
+      { repo: 'Adalbert_Stifter',              label: 'Adalbert Stifter' },
+      { repo: 'Akseli_Gallen-Kallela',         label: 'Akseli Gallen-Kallela' },
+      { repo: 'Albert_Bierstadt',              label: 'Albert Bierstadt' },
+      { repo: 'Alfred_Sisley',                 label: 'Alfred Sisley' },
+      { repo: 'Alphonse_Mucha',                label: 'Alphonse Mucha' },
+      { repo: 'Andy_Warhol',                   label: 'Andy Warhol' },
+      { repo: 'Antoine_Chintreuil',            label: 'Antoine Chintreuil' },
+      { repo: 'Arthur_Streeton',               label: 'Arthur Streeton' },
+      { repo: 'Banksy',                        label: 'Banksy' },
+      { repo: 'Berthe_Morisot',               label: 'Berthe Morisot' },
+      { repo: 'Camille_Pissarro',              label: 'Camille Pissarro' },
+      { repo: 'Charles_Marion_Russell',        label: 'Charles Marion Russell' },
+      { repo: 'Childe_Hassam',                 label: 'Childe Hassam' },
+      { repo: 'Claude_Monet',                  label: 'Claude Monet' },
+      { repo: 'Diego_Velazquez',               label: 'Diego Velázquez' },
+      { repo: 'Edgar_Degas',                   label: 'Edgar Degas' },
+      { repo: 'Edouard_Manet',                 label: 'Édouard Manet' },
+      { repo: 'Edvard_Munch',                  label: 'Edvard Munch' },
+      { repo: 'Edward_Hopper',                 label: 'Edward Hopper' },
+      { repo: 'El_Greco',                      label: 'El Greco' },
+      { repo: 'Eugene_Boudin',                 label: 'Eugène Boudin' },
+      { repo: 'Eugene_Delacroix',              label: 'Eugène Delacroix' },
+      { repo: 'Francois_Boucher',              label: 'François Boucher' },
+      { repo: 'Franz_Marc',                    label: 'Franz Marc' },
+      { repo: 'Frederic_Remington',            label: 'Frederic Remington' },
+      { repo: 'Frederick_McCubbin',            label: 'Frederick McCubbin' },
+      { repo: 'George_Stubbs',                 label: 'George Stubbs' },
+      { repo: 'George_Wesley_Bellows',         label: 'George Wesley Bellows' },
+      { repo: 'Georges_Seurat',                label: 'Georges Seurat' },
+      { repo: 'Gustav_Courbet',                label: 'Gustav Courbet' },
+      { repo: 'Gustav_Klimt',                  label: 'Gustav Klimt' },
+      { repo: 'Gustave_Caillebotte',           label: 'Gustave Caillebotte' },
+      { repo: 'Henri_de_Toulouse-Lautrec',     label: 'Henri de Toulouse-Lautrec' },
+      { repo: 'Henri_Matisse',                 label: 'Henri Matisse' },
+      { repo: 'Henri_Rousseau',                label: 'Henri Rousseau' },
+      { repo: 'Jackson_Pollock',               label: 'Jackson Pollock' },
+      { repo: 'Jacob_Maris',                   label: 'Jacob Maris' },
+      { repo: 'Keith_Haring',                  label: 'Keith Haring' },
+      { repo: 'Leonardo_da_Vinci',             label: 'Leonardo da Vinci' },
+      { repo: 'Marc_Chagall',                  label: 'Marc Chagall' },
+      { repo: 'Mark_Rothko',                   label: 'Mark Rothko' },
+      { repo: 'Mary_Cassatt',                  label: 'Mary Cassatt' },
+      { repo: 'Max_Ernst',                     label: 'Max Ernst' },
+      { repo: 'Norman_Rockwell',               label: 'Norman Rockwell' },
+      { repo: 'Pablo_Picasso',                 label: 'Pablo Picasso' },
+      { repo: 'Paul_Cezanne',                  label: 'Paul Cézanne' },
+      { repo: 'Paul_Gauguin',                  label: 'Paul Gauguin' },
+      { repo: 'Paul_Klee',                     label: 'Paul Klee' },
+      { repo: 'Pierre-Auguste_Renoir',         label: 'Pierre-Auguste Renoir' },
+      { repo: 'Rembrandt_Harmenszoon_van_Rijn', label: 'Rembrandt van Rijn' },
+      { repo: 'Sandro_Botticelli',             label: 'Sandro Botticelli' },
+      { repo: 'Vincent_van_Gogh',              label: 'Vincent van Gogh' },
+      { repo: 'Winslow_Homer',                 label: 'Winslow Homer' },
+    ];
     const $collListSave  = document.getElementById('collections-list-save');
     const $collListMsg   = document.getElementById('collections-list-msg');
+    const $collGrid      = document.getElementById('official-collections-grid');
+    const $collSearch    = document.getElementById('coll-search');
+    const $collCustom    = document.getElementById('collections-custom-input');
+    const $collSelAll    = document.getElementById('coll-select-all');
+    const $collDeselAll  = document.getElementById('coll-deselect-all');
+    const _officialChecked = new Set();
     let _collListBaseline = '';
+
+    function _renderCollGrid(filter) {
+      const q = (filter || '').toLowerCase();
+      const visible = OFFICIAL_COLLECTIONS.filter(c => !q || c.label.toLowerCase().includes(q));
+      $collGrid.innerHTML = visible.map(c =>
+        `<label style="display:flex;align-items:center;gap:5px;padding:2px 0;cursor:pointer;font-size:12px;color:#f2eee9;user-select:none;overflow:hidden;">
+          <input type="checkbox" data-repo="${c.repo}" ${_officialChecked.has(c.repo) ? 'checked' : ''} style="width:14px;height:14px;cursor:pointer;accent-color:#2f7fbf;flex-shrink:0;">
+          <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${c.label}</span>
+        </label>`
+      ).join('');
+      $collGrid.querySelectorAll('input[type=checkbox]').forEach(cb => {
+        cb.addEventListener('change', () => {
+          if (cb.checked) _officialChecked.add(cb.dataset.repo);
+          else _officialChecked.delete(cb.dataset.repo);
+          _collListMarkDirty();
+        });
+      });
+    }
+
+    function _buildCollListContent() {
+      const officialLines = OFFICIAL_COLLECTIONS
+        .filter(c => _officialChecked.has(c.repo))
+        .map(c => `https://github.com/kohlerryan/${c.repo}.git`);
+      const customLines = ($collCustom ? $collCustom.value : '')
+        .split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+      const all = [...officialLines, ...customLines];
+      return all.length ? all.join('\n') + '\n' : '';
+    }
+
+    function _parseCollListContent(content) {
+      _officialChecked.clear();
+      const customLines = [];
+      const officialRepos = new Set(OFFICIAL_COLLECTIONS.map(c => c.repo));
+      for (const line of (content || '').split('\n')) {
+        const t = line.trim();
+        if (!t || t.startsWith('#')) continue;
+        const m = t.match(/\/kohlerryan\/([^/]+?)\.git$/);
+        if (m && officialRepos.has(m[1])) {
+          _officialChecked.add(m[1]);
+        } else {
+          customLines.push(t);
+        }
+      }
+      if ($collCustom) $collCustom.value = customLines.join('\n');
+      _renderCollGrid($collSearch ? $collSearch.value : '');
+    }
+
     function _collListMarkDirty() {
-      const changed = $collListInput.value !== _collListBaseline;
+      const changed = _buildCollListContent() !== _collListBaseline;
       $collListSave.disabled = !changed;
       $collListSave.style.opacity = changed ? 1 : 0.6;
     }
+
     async function _loadCollectionsList() {
       try {
         const res = await fetch('/api/collections-list', { cache: 'no-store' });
         if (res.ok) {
           const j = await res.json();
           _collListBaseline = j.content || '';
-          $collListInput.value = _collListBaseline;
+          _parseCollListContent(_collListBaseline);
           _collListMarkDirty();
         }
       } catch (_) {}
     }
-    if ($collListInput) {
-      $collListInput.addEventListener('input', _collListMarkDirty);
-      _loadCollectionsList();
-    }
+    if ($collSearch) $collSearch.addEventListener('input', () => _renderCollGrid($collSearch.value));
+    if ($collSelAll) $collSelAll.addEventListener('click', () => {
+      OFFICIAL_COLLECTIONS.forEach(c => _officialChecked.add(c.repo));
+      _renderCollGrid($collSearch ? $collSearch.value : '');
+      _collListMarkDirty();
+    });
+    if ($collDeselAll) $collDeselAll.addEventListener('click', () => {
+      _officialChecked.clear();
+      _renderCollGrid($collSearch ? $collSearch.value : '');
+      _collListMarkDirty();
+    });
+    if ($collCustom) $collCustom.addEventListener('input', _collListMarkDirty);
+    _renderCollGrid('');
+    _loadCollectionsList();
     if ($collListSave) {
       $collListSave.onclick = async () => {
         $collListSave.disabled = true; $collListSave.style.opacity = 0.6;
         $collListMsg.textContent = 'Saving\u2026';
+        const content = _buildCollListContent();
         try {
           const res = await fetch('/api/collections-list', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ content: $collListInput.value }),
+            body: JSON.stringify({ content }),
           });
           const j = await res.json();
           if (j.ok) {
-            _collListBaseline = $collListInput.value;
+            _collListBaseline = content;
             $collListMsg.textContent = 'Saved. Click \u201cUpdate & Refresh\u201d to pull the updated list.';
             setTimeout(() => { $collListMsg.textContent = ''; }, 5000);
           } else {

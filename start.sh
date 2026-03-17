@@ -227,10 +227,19 @@ fi
 
 # Optional: serve local web UI + media via simple HTTP server
 if [ "${SAMSUNG_TV_ART_LOCAL_WEB:-true}" = "true" ]; then
-  # Generate env defaults for the web UI
-  WS_HOST="${SAMSUNG_TV_ART_MQTT_HOST:-$HOSTNAME}"
+  # Generate env defaults for the web UI.
+  # SAMSUNG_TV_ART_MQTT_WS_HOST is a dedicated host for the browser WebSocket connection.
+  # If not set, leave broker blank so the browser defaults to location.hostname (the server
+  # the user accessed the UI from), which is correct for typical single-server setups.
+  # Never fall back to SAMSUNG_TV_ART_MQTT_HOST here — it may be a Docker-internal service
+  # name (e.g. "mosquitto") that the browser cannot resolve.
+  WS_HOST="${SAMSUNG_TV_ART_MQTT_WS_HOST:-}"
   WS_PORT="${SAMSUNG_TV_ART_MQTT_WS_PORT:-9001}"
-  WS_URL="ws://$WS_HOST:${WS_PORT}"
+  if [ -n "$WS_HOST" ]; then
+    WS_URL="ws://$WS_HOST:${WS_PORT}"
+  else
+    WS_URL=""
+  fi
   UI_USER="${SAMSUNG_TV_ART_MQTT_USERNAME:-}"
   UI_PASS=""
   if [ "${SAMSUNG_TV_ART_LOCAL_WEB_EXPOSE_PASSWORD:-false}" = "true" ]; then

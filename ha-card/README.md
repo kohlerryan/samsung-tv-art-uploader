@@ -10,7 +10,7 @@ A custom [Home Assistant](https://www.home-assistant.io/) Lovelace card for cont
 
 > **Upgrading from v0.1.x?** See the [v0.2.0 release notes](https://github.com/kohlerryan/samsung-tv-art-card/releases/tag/v0.2.0) for breaking changes and what's new.
 
-> **Upgrading from v0.2.x?** See the [v0.2.2-beta.1 release notes](https://github.com/kohlerryan/samsung-tv-art-card/releases/tag/v0.2.2-beta.1) for what's new.
+> **Upgrading from v0.2.x?** See the [v0.2.2-beta.2 release notes](https://github.com/kohlerryan/samsung-tv-art-card/releases/tag/v0.2.2-beta.2) for what's new.
 
 ---
 
@@ -33,7 +33,7 @@ A custom [Home Assistant](https://www.home-assistant.io/) Lovelace card for cont
 - **Live progress log** — real-time status messages streamed from the backend during any refresh operation; state is preserved across page reloads for up to 15 minutes
 - **Settings panel** — configure TV IP address and MQTT broker connection (host, port, username, password) without leaving the dashboard; Apply & Restart pushes the new config and restarts the backend container
 
-  ![Settings panel with TV IP and MQTT broker fields](images/hacard_settings_v0.2.1.png)
+  ![Settings panel with TV IP and MQTT broker fields](images/hacard_settings_v0.2.2.png)
 - **Mixed-content safe** — resolves image paths over HTTP or HTTPS to match the HA frontend protocol
 
 ---
@@ -60,7 +60,7 @@ A custom [Home Assistant](https://www.home-assistant.io/) Lovelace card for cont
    ```yaml
    lovelace:
      resources:
-       - url: /local/samsung-tv-art-card/samsung-tv-art-card.js?v=v0.2.2-beta.1
+       - url: /local/samsung-tv-art-card/samsung-tv-art-card.js?v=v0.2.2-beta.2
          type: module
    ```
 
@@ -154,4 +154,4 @@ The 1-minute delay gives the `samsung-tv-art` backend container time to fully st
 
 ## Version
 
-Current version: **v0.2.2-beta.1** — bump the `?v=` cache-buster in the resource URL whenever you upgrade.
+Current version: **v0.2.2-beta.2** — bump the `?v=` cache-buster in the resource URL whenever you upgrade.

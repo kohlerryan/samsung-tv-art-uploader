@@ -91,6 +91,28 @@ except Exception:
 logging.basicConfig(level=logging.INFO)
 
 
+class MQTTLogHandler(logging.Handler):
+    """Logging handler that forwards records to frame_tv/log (non-retained, QoS 0)."""
+    TOPIC = 'frame_tv/log'
+
+    def __init__(self, mqtt_client):
+        super().__init__(level=logging.INFO)
+        self._mqtt = mqtt_client
+        self._publishing = False  # re-entrancy guard
+
+    def emit(self, record):
+        if self._publishing:
+            return
+        try:
+            self._publishing = True
+            msg = self.format(record)
+            self._mqtt.publish(self.TOPIC, msg, qos=0, retain=False)
+        except Exception:
+            pass
+        finally:
+            self._publishing = False
+
+
 def parseargs():
     # Add command line argument parsing
     parser = argparse.ArgumentParser(description='Async Upload images to Samsung TV')
@@ -379,6 +401,7 @@ class monitor_and_display:
         self._last_slideshow_paths = set() # path_rel values from the previous seed, used to avoid re-picking the same images
         self._loop = None
         self._collections_sync_running = False
+        self._artmode_event = None         # asyncio.Event set when TV signals an art mode change
         try:
             #doesn't work in Windows
             asyncio.get_running_loop().add_signal_handler(SIGINT, self.close)
@@ -442,6 +465,44 @@ class monitor_and_display:
         """Create TV connection object. May raise if TV is unreachable."""
         from samsungtvws.async_art import SamsungTVAsyncArt
         self.tv = SamsungTVAsyncArt(host=self.ip, port=8002, token_file=self.token_file)
+        self._artmode_event = asyncio.Event()
+        self._register_artmode_callbacks()
+
+    def _register_artmode_callbacks(self):
+        """Register WebSocket event callbacks so art mode changes wake the main loop instantly."""
+        def _signal_artmode_change():
+            if self._artmode_event:
+                self._artmode_event.set()
+
+        async def _on_go_to_standby(event, response):
+            self.log.debug('TV WebSocket event: go_to_standby')
+            self._in_art_mode = False
+            self.last_artmode_check = time.time()
+            _signal_artmode_change()
+
+        async def _on_art_mode_changed(event, response):
+            try:
+                data = json.loads(response['data'])
+                new_state = data.get('status') == 'on'
+            except Exception:
+                new_state = None
+            self.log.debug('TV WebSocket event: art_mode_changed (status=%s)', new_state)
+            if new_state is not None:
+                self._in_art_mode = new_state
+                self.last_artmode_check = time.time()
+            _signal_artmode_change()
+
+        async def _on_wakeup(event, response):
+            self.log.debug('TV WebSocket event: wakeup')
+            # Don't set _in_art_mode here — let the poll confirm; just wake the loop
+            _signal_artmode_change()
+
+        try:
+            self.tv.callbacks['go_to_standby'] = _on_go_to_standby
+            self.tv.callbacks['art_mode_changed'] = _on_art_mode_changed
+            self.tv.callbacks['wakeup'] = _on_wakeup
+        except Exception as e:
+            self.log.warning('Failed to register TV artmode callbacks: %s', e)
         
     async def start_monitoring(self):
         '''
@@ -944,10 +1005,21 @@ class monitor_and_display:
         Also compresses images that exceed the Samsung TV art upload limit (~2 MB).
         '''
         # Older Frame TVs (e.g. 2019) reject uploads over ~1 MB with error -1.
-        # Set SAMSUNG_TV_ART_MAX_FILE_BYTES to enable compression (e.g. 900000 for 2019 models).
+        # Set SAMSUNG_TV_ART_MAX_FILE_BYTES to enable compression (e.g. 800000 for 2019 models;
+        # the actual 2019 limit is typically ~750-800 KB, not 900 KB).
         # Unset by default — no size-based recompression on modern TVs.
         _max_bytes_env = os.environ.get('SAMSUNG_TV_ART_MAX_FILE_BYTES', '').strip()
         MAX_UPLOAD_BYTES = int(_max_bytes_env) if _max_bytes_env else None
+        # Optionally cap image dimensions, e.g. SAMSUNG_TV_ART_MAX_DIMENSION=1920x1080.
+        # Useful for 2019 1080p Frame TVs where large images are rejected even under the byte limit.
+        # Accepts "WxH" (e.g. "1920x1080") or a single number for square cap (e.g. "1920").
+        _max_dim_env = os.environ.get('SAMSUNG_TV_ART_MAX_DIMENSION', '').strip()
+        if _max_dim_env:
+            _parts = _max_dim_env.lower().replace('x', ' ').split()
+            MAX_DIM_W = int(_parts[0]) if _parts else None
+            MAX_DIM_H = int(_parts[1]) if len(_parts) > 1 else MAX_DIM_W
+        else:
+            MAX_DIM_W, MAX_DIM_H = None, None
         try:
             with open(filename, 'rb') as f:
                 file_data = f.read()
@@ -960,10 +1032,17 @@ class monitor_and_display:
                     img_fmt = img.format or 'JPEG'
                     needs_save = False
 
-                    # Step 1: Resize to fit 4K if dimensions exceed it
+                    # Step 1a: Resize to fit 4K if dimensions exceed it
                     if img.width > 3840 or img.height > 2160:
                         self.log.info('Resizing image {} from {}x{} to fit 4K'.format(filename, img.width, img.height))
                         img.thumbnail((3840, 2160), Image.Resampling.LANCZOS)
+                        needs_save = True
+
+                    # Step 1b: Optionally cap to a user-specified max dimension
+                    if MAX_DIM_W and (img.width > MAX_DIM_W or img.height > MAX_DIM_H):
+                        self.log.info('Resizing image {} from {}x{} to fit {}x{}'.format(
+                            filename, img.width, img.height, MAX_DIM_W, MAX_DIM_H))
+                        img.thumbnail((MAX_DIM_W, MAX_DIM_H), Image.Resampling.LANCZOS)
                         needs_save = True
 
                     # Step 2: Re-encode to get accurate byte count after any resize,
@@ -985,16 +1064,39 @@ class monitor_and_display:
                             img.save(output, format='JPEG', quality=max(quality, 50))
                             file_data = output.getvalue()
 
+                        # If quality reduction alone isn't enough, also halve the resolution
+                        # and retry. This handles 4K images on TVs with low byte limits.
+                        if MAX_UPLOAD_BYTES and len(file_data) > MAX_UPLOAD_BYTES:
+                            new_w, new_h = max(1, img.width // 2), max(1, img.height // 2)
+                            self.log.info(
+                                'Quality reduction insufficient for %s (%d bytes); '
+                                'scaling to %dx%d and retrying',
+                                filename, len(file_data), new_w, new_h
+                            )
+                            img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+                            quality = 92
+                            output = io.BytesIO()
+                            img.save(output, format='JPEG', quality=quality)
+                            file_data = output.getvalue()
+                            while MAX_UPLOAD_BYTES and len(file_data) > MAX_UPLOAD_BYTES and quality > 50:
+                                quality -= 8
+                                output = io.BytesIO()
+                                img.save(output, format='JPEG', quality=max(quality, 50))
+                                file_data = output.getvalue()
+
+                        actual_quality = max(quality, 50)
                         if MAX_UPLOAD_BYTES and len(file_data) > MAX_UPLOAD_BYTES:
                             self.log.warning(
-                                'Image %s is still %d bytes after quality=%d compression; '
+                                'Image %s is still %d bytes (quality=%d, %dx%d) after compression; '
                                 'TV may reject it (limit ~%d bytes)',
-                                filename, len(file_data), quality, MAX_UPLOAD_BYTES
+                                filename, len(file_data), actual_quality,
+                                img.width, img.height, MAX_UPLOAD_BYTES
                             )
-                        elif needs_save or quality < 92:
+                        elif needs_save or actual_quality < 92:
                             self.log.info(
-                                'Image %s reprocessed to %d bytes (quality=%d)',
-                                filename, len(file_data), quality
+                                'Image %s reprocessed to %d bytes (quality=%d, %dx%d)',
+                                filename, len(file_data), actual_quality,
+                                img.width, img.height
                             )
                 except Exception as e:
                     self.log.warning('Failed to process image {}: {}'.format(filename, e))
@@ -1071,10 +1173,11 @@ class monitor_and_display:
                 'path_rel': rel_path or filename
             }
         
-    async def upload_files(self, filenames):
+    async def upload_files(self, filenames, progress_cb=None):
         '''
         upload files in list to tv with rate limiting to avoid overwhelming TV
         Supports both simple filenames (from current folder) and relative paths (from multi-collection mode).
+        progress_cb(idx, total, display_name) is called before each upload if provided.
         '''
         upload_delay = self.upload_delay_seconds  # seconds between uploads
         consecutive_failures = 0
@@ -1099,6 +1202,11 @@ class monitor_and_display:
             file_data, file_type = self.read_file(path)
             if file_data and self.tv.art_mode:
                 self.log.info('uploading : {} to tv ({}/{})'.format(display_name, idx + 1, len(filenames)))
+                if progress_cb:
+                    try:
+                        progress_cb(idx + 1, len(filenames), display_name)
+                    except Exception:
+                        pass
                 content_id = None
                 try:
                     content_id = await self.tv.upload(file_data, file_type=file_type, matte=self.matte, portrait_matte=self.matte)
@@ -1213,7 +1321,7 @@ class monitor_and_display:
                 new_files = sorted(new_files)
             self.log.info('adding files to tv : {}'.format(new_files))
             await self.wait_for_files(new_files)
-            await self.upload_files(new_files)
+            await self.upload_files(new_files, progress_cb=getattr(self, '_reseed_progress_cb', None))
             return len(new_files)
         return 0
 
@@ -1605,6 +1713,10 @@ class monitor_and_display:
             self._mqtt_is_connected = (rc_val == 0)
             if rc_val == 0:
                 self.log.info('MQTT connected (CONNACK rc=0)')
+                # Attach MQTT log handler so all INFO+ records stream to frame_tv/log
+                if not getattr(self, '_mqtt_log_handler', None):
+                    self._mqtt_log_handler = MQTTLogHandler(client)
+                    logging.getLogger().addHandler(self._mqtt_log_handler)
                 # Ensure subscriptions are in place after reconnects
                 try:
                     if self.selection_from_mqtt:
@@ -1631,6 +1743,10 @@ class monitor_and_display:
             self._mqtt_is_connected = False
             rc_val = getattr(rc, 'value', rc)
             self.log.warning('MQTT disconnected (rc=%s)', str(rc_val))
+            # Detach MQTT log handler on disconnect to avoid publish errors
+            if getattr(self, '_mqtt_log_handler', None):
+                logging.getLogger().removeHandler(self._mqtt_log_handler)
+                self._mqtt_log_handler = None
         except Exception:
             pass
 
@@ -1827,6 +1943,8 @@ class monitor_and_display:
                 "SAMSUNG_TV_ART_SEQUENTIAL": '1' if self.sequential else '0',
                 "SAMSUNG_TV_ART_MQTT_HOST": str(os.environ.get('SAMSUNG_TV_ART_MQTT_HOST', self.mqtt_host or '')),
                 "SAMSUNG_TV_ART_MQTT_PORT": str(os.environ.get('SAMSUNG_TV_ART_MQTT_PORT', str(self.mqtt_port or 1883))),
+                "SAMSUNG_TV_ART_MQTT_WS_HOST": str(os.environ.get('SAMSUNG_TV_ART_MQTT_WS_HOST', '')),
+                "SAMSUNG_TV_ART_MQTT_WS_PORT": str(os.environ.get('SAMSUNG_TV_ART_MQTT_WS_PORT', '9001')),
                 "SAMSUNG_TV_ART_MQTT_USERNAME": str(os.environ.get('SAMSUNG_TV_ART_MQTT_USERNAME', self.mqtt_username or '')),
             }
             try:
@@ -2010,6 +2128,12 @@ class monitor_and_display:
                 'SAMSUNG_TV_ART_UPDATE_MINUTES',
                 'SAMSUNG_TV_ART_TV_IP',
                 'SAMSUNG_TV_ART_SEQUENTIAL',
+                'SAMSUNG_TV_ART_MQTT_HOST',
+                'SAMSUNG_TV_ART_MQTT_WS_HOST',
+                'SAMSUNG_TV_ART_MQTT_PORT',
+                'SAMSUNG_TV_ART_MQTT_WS_PORT',
+                'SAMSUNG_TV_ART_MQTT_USERNAME',
+                'SAMSUNG_TV_ART_MQTT_PASSWORD',
             }
             for k, v in updates.items():
                 if k in allowed:
@@ -2268,7 +2392,7 @@ class monitor_and_display:
                 # Also refresh discovery/state for UI consistency
                 self._publish_collections_discovery()
                 self._publish_collections_state()
-                self._publish_ack('collections/refresh', 'ok', 'Collections refresh queued', req_id)
+                self._publish_ack('collections/refresh', 'queued', 'Collections refresh queued', req_id)
                 return
             if cmd == 'settings/refresh':
                 self._publish_settings_discovery()
@@ -2328,8 +2452,12 @@ class monitor_and_display:
                         updates['SAMSUNG_TV_ART_TV_IP'] = str(data['SAMSUNG_TV_ART_TV_IP']).strip()
                     if 'SAMSUNG_TV_ART_MQTT_HOST' in data:
                         updates['SAMSUNG_TV_ART_MQTT_HOST'] = str(data['SAMSUNG_TV_ART_MQTT_HOST']).strip()
+                    if 'SAMSUNG_TV_ART_MQTT_WS_HOST' in data:
+                        updates['SAMSUNG_TV_ART_MQTT_WS_HOST'] = str(data['SAMSUNG_TV_ART_MQTT_WS_HOST']).strip()
                     if 'SAMSUNG_TV_ART_MQTT_PORT' in data:
                         updates['SAMSUNG_TV_ART_MQTT_PORT'] = str(int(data['SAMSUNG_TV_ART_MQTT_PORT']))
+                    if 'SAMSUNG_TV_ART_MQTT_WS_PORT' in data:
+                        updates['SAMSUNG_TV_ART_MQTT_WS_PORT'] = str(int(data['SAMSUNG_TV_ART_MQTT_WS_PORT']))
                     if 'SAMSUNG_TV_ART_MQTT_USERNAME' in data:
                         updates['SAMSUNG_TV_ART_MQTT_USERNAME'] = str(data['SAMSUNG_TV_ART_MQTT_USERNAME']).strip()
                     if 'SAMSUNG_TV_ART_MQTT_PASSWORD' in data:
@@ -2660,7 +2788,15 @@ class monitor_and_display:
             if not await self.safe_in_artmode():
                 backoff_delay = self.get_backoff_delay()
                 self.log.info('TV not in art mode; pausing %d seconds (backoff level %d)', backoff_delay, self.consecutive_failures)
-                await asyncio.sleep(backoff_delay)
+                if self._artmode_event:
+                    self._artmode_event.clear()
+                    try:
+                        await asyncio.wait_for(self._artmode_event.wait(), timeout=backoff_delay)
+                        self.log.debug('Art mode event received — rechecking immediately')
+                    except asyncio.TimeoutError:
+                        pass
+                else:
+                    await asyncio.sleep(backoff_delay)
                 continue
             await self.check_dir()
             # Periodically republish current artwork state to keep MQTT fresh
@@ -2674,7 +2810,15 @@ class monitor_and_display:
                 pass
             if self.period == 0:
                 break
-            await asyncio.sleep(self.period)
+            if self._artmode_event:
+                self._artmode_event.clear()
+                try:
+                    await asyncio.wait_for(self._artmode_event.wait(), timeout=self.period)
+                    self.log.debug('Art mode event received during idle — rechecking')
+                except asyncio.TimeoutError:
+                    pass
+            else:
+                await asyncio.sleep(self.period)
 
     async def _publish_current_artwork_state(self, force=False):
         """Poll current TV artwork and publish MQTT state/attributes.
@@ -2744,6 +2888,10 @@ class monitor_and_display:
         self._refresh_in_progress = True
         self._publish_slideshow_state()
         try:
+            def _on_upload_progress(idx, total, name):
+                ack('progress', f'Uploading {idx}/{total}: {os.path.basename(name)}')
+            self._reseed_progress_cb = _on_upload_progress
+
             if skip_started_ack:
                 ack('progress', 'Preparing TV for update — switching to standby...')
             else:
@@ -2762,7 +2910,9 @@ class monitor_and_display:
                 v.get('path_rel') for v in self.uploaded_files.values() if v.get('path_rel')
             }
 
-            ack('progress', 'Removing old uploads from TV...')
+            # Count existing uploads before cleanup for the progress message
+            _existing = len([k for k in self.uploaded_files if k not in self.exclude and k != (os.path.basename(self.standby) if self.standby else None)])
+            ack('progress', f'Removing {_existing} old upload(s) from TV...' if _existing else 'Removing old uploads from TV...')
             await self.cleanup_old_uploads()
 
             # Re-select standby after cleanup: the TV can revert to the last playing art
@@ -2793,6 +2943,7 @@ class monitor_and_display:
             ack('error', f'Exception: {e}')
             raise
         finally:
+            self._reseed_progress_cb = None
             self._refresh_in_progress = False
             self._publish_slideshow_state()
             self._publish_slideshow_available()

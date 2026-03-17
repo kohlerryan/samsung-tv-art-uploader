@@ -1,5 +1,5 @@
 /**
- * Frame TV Art Card v0.2.2-beta.1
+ * Frame TV Art Card v0.2.2-beta.2
  */
 
 class FrameTVArtCard extends HTMLElement {
@@ -12,6 +12,8 @@ class FrameTVArtCard extends HTMLElement {
     this._statusMessage = '';
     this._refreshAck = { status: '', message: '', req_id: '', updated: 0 };
     this._refreshRequest = { req_id: '', updated: 0 };
+    this._logLines = [];  // rolling buffer of frame_tv/log messages
+    this._logUnsubscribe = null;
     this._syncAck = { status: '', message: '', req_id: '', updated: 0 };
     this._refreshAckUnsubscribe = null;
     this._refreshCmdUnsubscribe = null;
@@ -199,7 +201,7 @@ class FrameTVArtCard extends HTMLElement {
   _ensureRefreshSubscriptions() {
     if (!this._hass || !this._hass.connection) return;
     if (this._refreshSubscribing) return;
-    if (this._refreshAckUnsubscribe && this._refreshCmdUnsubscribe && this._syncAckUnsubscribe && this._slideshowAttrsUnsubscribe && this._slideshowAvailUnsubscribe) return;
+    if (this._refreshAckUnsubscribe && this._refreshCmdUnsubscribe && this._syncAckUnsubscribe && this._slideshowAttrsUnsubscribe && this._slideshowAvailUnsubscribe && this._logUnsubscribe) return;
     this._refreshSubscribing = true;
 
     const ensureAck = this._refreshAckUnsubscribe
@@ -237,13 +239,32 @@ class FrameTVArtCard extends HTMLElement {
           { type: 'mqtt/subscribe', topic: this._config.slideshow_available_topic }
         );
 
-    Promise.all([ensureAck, ensureCmd, ensureSyncAck, ensureSlideshowAttrs, ensureSlideshowAvail])
-      .then(([ackUnsub, cmdUnsub, syncAckUnsub, slideshowAttrsUnsub, slideshowAvailUnsub]) => {
+    const ensureLog = this._logUnsubscribe
+      ? Promise.resolve(this._logUnsubscribe)
+      : this._hass.connection.subscribeMessage(
+          (msg) => {
+            const line = (msg && (msg.payload || msg)) || '';
+            const s = typeof line === 'string' ? line.trim() : JSON.stringify(line);
+            if (!s) return;
+            this._logLines.push(s);
+            if (this._logLines.length > 60) this._logLines.shift();
+            // Update visible log element if showing standby and not in curated refresh
+            if (!this._refreshInProgress && this._isStandbyLike) {
+              const logEl = this.querySelector('.ftv-refresh-log');
+              if (logEl) { logEl.innerHTML = this._logLines.map(l => this._logLineHtml(l)).join(''); requestAnimationFrame(() => { logEl.scrollTop = logEl.scrollHeight; }); }
+            }
+          },
+          { type: 'mqtt/subscribe', topic: 'frame_tv/log' }
+        );
+
+    Promise.all([ensureAck, ensureCmd, ensureSyncAck, ensureSlideshowAttrs, ensureSlideshowAvail, ensureLog])
+      .then(([ackUnsub, cmdUnsub, syncAckUnsub, slideshowAttrsUnsub, slideshowAvailUnsub, logUnsub]) => {
         if (!this._refreshAckUnsubscribe) this._refreshAckUnsubscribe = ackUnsub;
         if (!this._refreshCmdUnsubscribe) this._refreshCmdUnsubscribe = cmdUnsub;
         if (!this._syncAckUnsubscribe) this._syncAckUnsubscribe = syncAckUnsub;
         if (!this._slideshowAttrsUnsubscribe) this._slideshowAttrsUnsubscribe = slideshowAttrsUnsub;
         if (!this._slideshowAvailUnsubscribe) this._slideshowAvailUnsubscribe = slideshowAvailUnsub;
+        if (!this._logUnsubscribe) this._logUnsubscribe = logUnsub;
       })
       .catch(() => {})
       .finally(() => {
@@ -275,16 +296,17 @@ class FrameTVArtCard extends HTMLElement {
     const renderLog = () => {
       const infoEl = this.querySelector('.ftv-info');
       const logEl = this.querySelector('.ftv-refresh-log');
-      if (infoEl) infoEl.innerHTML = this._refreshProgressLog.length ? `<div>${this._refreshProgressLog[0]}</div>` : '';
-      if (logEl) logEl.innerHTML = this._refreshProgressLog.slice(1).map(l => `<div>${l}</div>`).join('');
+      if (infoEl) infoEl.innerHTML = '<div style="color:white">Refresh in progress…</div>';
+      if (logEl) logEl.innerHTML = this._refreshProgressLog.map(l => this._logLineHtml(l)).join('');
       try { sessionStorage.setItem('ftvHaRefreshLog', JSON.stringify({ log: this._refreshProgressLog, ts: Date.now() })); sessionStorage.setItem('ftvHaRefreshActive', '1'); } catch(_) {}
+      this._syncInfoFade(infoEl);
     };
 
     const appendProgress = (msg) => {
       if (this._staleClearTimer) { clearTimeout(this._staleClearTimer); this._staleClearTimer = null; }
       if (!this._refreshInProgress) {
         // First message: lock the display, seed the log, trigger full re-render with standby bg
-        this._refreshProgressLog = ['Please stand by as artwork is loaded...'];
+        this._refreshProgressLog = [];
         if (msg) this._refreshProgressLog.push(msg);
         this._refreshProgressMsg = msg;
         this._refreshInProgress = true;
@@ -343,16 +365,16 @@ class FrameTVArtCard extends HTMLElement {
     const payload = this._parseJsonPayload(message);
     const reqId = payload && payload.req_id != null ? String(payload.req_id) : '';
     this._refreshRequest = { req_id: reqId, updated: Date.now() };
-    const reqMatches = !this._lastRefreshReqId || !reqId || String(this._lastRefreshReqId) === reqId;
-    if (reqMatches) {
-      this._refreshAck = {
-        status: 'queued',
-        message: 'Refresh request queued. Waiting for backend confirmation...',
-        req_id: reqId,
-        updated: Date.now(),
-      };
-      this._syncRefreshAckStatus();
-    }
+    // Adopt the new req_id immediately so acks for this refresh are accepted by all clients,
+    // not just the one that triggered it. cmd topic is never retained, so this is always live.
+    if (reqId) this._lastRefreshReqId = reqId;
+    this._refreshAck = {
+      status: 'queued',
+      message: 'Refresh request queued. Waiting for backend confirmation...',
+      req_id: reqId,
+      updated: Date.now(),
+    };
+    this._syncRefreshAckStatus();
   }
 
   _handleRefreshAckMessage(message) {
@@ -659,6 +681,14 @@ class FrameTVArtCard extends HTMLElement {
     return { file: trimmed, display: null, collection: null };
   }
 
+  _logLineHtml(line) {
+    const l = line.toLowerCase();
+    const color = l.includes(':error:') || l.startsWith('error') ? '#ff6b6b'
+                : l.includes(':warning:') || l.startsWith('warning') ? '#ffd166'
+                : '#6bcb77';
+    return `<div style="color:${color}">${this._escapeHtml(line)}</div>`;
+  }
+
   _escapeHtml(text) {
     if (text == null) return '';
     return String(text)
@@ -760,6 +790,12 @@ class FrameTVArtCard extends HTMLElement {
         infoDiv.innerHTML = artworkText;
         this._syncInfoFade(infoDiv);
       }
+      // Show live log lines in the log element during standby
+      if (standbyLike && !this._refreshInProgress) {
+        const logEl = this.querySelector('.ftv-refresh-log');
+        if (logEl) { logEl.innerHTML = this._logLines.map(l => this._logLineHtml(l)).join(''); requestAnimationFrame(() => { logEl.scrollTop = logEl.scrollHeight; }); }
+        this._syncInfoFade(infoDiv);
+      }
       
       // Also update background if we now have metadata
       this._updateBackgroundFromCsv();
@@ -790,17 +826,21 @@ class FrameTVArtCard extends HTMLElement {
   _syncInfoFade(infoEl) {
     const wrapEl = this.querySelector('.ftv-progress-wrap');
     const fadeEl = this.querySelector('.ftv-info-fade');
+    const logEl = this.querySelector('.ftv-refresh-log');
     if (!wrapEl) return;
     requestAnimationFrame(() => {
-      const overflow = wrapEl.scrollHeight > wrapEl.clientHeight + 2;
+      // In standby the wrap fills available space and the log element is the scroller.
+      // In artwork mode the wrap itself is the scroller.
+      const scrollEl = (this._isStandbyLike && logEl && logEl.scrollHeight > 0) ? logEl : wrapEl;
+      const overflow = scrollEl.scrollHeight > scrollEl.clientHeight + 2;
       if (fadeEl) fadeEl.style.display = overflow ? '' : 'none';
       wrapEl.style.cursor = overflow ? 'pointer' : '';
       wrapEl.dataset.overflows = overflow ? '1' : '';
-      if (overflow && !wrapEl._ftv_scroll_bound) {
-        wrapEl._ftv_scroll_bound = true;
-        wrapEl.addEventListener('scroll', () => {
+      if (overflow && !scrollEl._ftv_scroll_bound) {
+        scrollEl._ftv_scroll_bound = true;
+        scrollEl.addEventListener('scroll', () => {
           if (!fadeEl) return;
-          const atBottom = wrapEl.scrollTop + wrapEl.clientHeight >= wrapEl.scrollHeight - 4;
+          const atBottom = scrollEl.scrollTop + scrollEl.clientHeight >= scrollEl.scrollHeight - 4;
           fadeEl.style.display = atBottom ? 'none' : '';
         });
       }
@@ -935,8 +975,10 @@ class FrameTVArtCard extends HTMLElement {
     const isNotInArtMode = !inArtMode;
     const isStandby = isNotInArtMode || this._refreshInProgress || !normalizedFile || normalizedFile === 'standby.png' || normalizedFile === 'unknown' || normalizedFile === 'unavailable' || normalizedFile === 'none';
     this._isStandbyLike = isStandby;
+    this._isNotInArtMode = isNotInArtMode;
     const hasArtwork = bgUrl !== null;
     const isCompressed = (this._config.layout_mode || 'fixed') !== 'dynamic';
+    const mqttConnected = !!(this._hass && this._config.settings_entity && this._hass.states[this._config.settings_entity] && this._hass.states[this._config.settings_entity].state !== 'unavailable');
     this._isFixed = isCompressed;
 
     // Initialize staged selection to baseline on render
@@ -956,8 +998,8 @@ class FrameTVArtCard extends HTMLElement {
       setTimeout(() => {
         const infoEl = this.querySelector('.ftv-info');
         const logEl = this.querySelector('.ftv-refresh-log');
-        if (infoEl) infoEl.innerHTML = this._refreshProgressLog.length ? `<div>${this._refreshProgressLog[0]}</div>` : '';
-        if (logEl) logEl.innerHTML = this._refreshProgressLog.slice(1).map(l => `<div>${l}</div>`).join('');
+        if (infoEl) infoEl.innerHTML = '<div style="color:white">Refresh in progress…</div>';
+        if (logEl) logEl.innerHTML = this._refreshProgressLog.map(l => this._logLineHtml(l)).join('');
       }, 0);
     } else {
       setTimeout(() => {
@@ -1200,19 +1242,23 @@ class FrameTVArtCard extends HTMLElement {
           }
           .ftv-progress-wrap {
             ${hasArtwork ? 'background: rgba(0,0,0,0.55); border-radius: 8px; transition: background 0.25s;' : ''}
-            ${isCompressed ? 'flex: 1; min-height: 0; overflow-y: auto; position: relative; padding-bottom: 8px;' : (hasArtwork ? 'overflow: hidden;' : '')}
+            ${isCompressed ? 'flex: 1; min-height: 0; position: relative;' : (hasArtwork ? 'overflow: hidden;' : '')}
+            ${isStandby ? 'display: flex; flex-direction: column; overflow-y: hidden; padding-bottom: 8px;' : isCompressed ? 'overflow-y: auto; padding-bottom: 8px;' : ''}
           }
           .ftv-info {
             display: block;
             width: 100%;
             box-sizing: border-box;
             padding: 12px;
+            ${isStandby ? 'flex: 0 0 auto;' : ''}
             ${hasArtwork ? 'color: white;' : ''}
           }
           .ftv-refresh-log {
             font-size: 0.85em;
             line-height: 1.6;
-            ${hasArtwork ? 'padding: 0 12px 10px; color: rgba(255,255,255,0.75);' : 'color: var(--secondary-text-color);'}
+            ${isStandby ? 'flex: 1; min-height: 0; max-height: none;' : 'max-height: 200px;'}
+            overflow-y: auto;
+            ${hasArtwork ? 'padding: 0 12px 10px;' : ''}
           }
           .ftv-refresh-log:empty { display: none; }
           ${isCompressed ? `
@@ -1440,7 +1486,7 @@ class FrameTVArtCard extends HTMLElement {
               </div>
             </div>
             ${this._slideshowMode === 'override' ? '<div class="ftv-op-hint-text" style="margin-bottom:2px;">&#x2713; Override active — re-apply anytime to change the selection.</div>' : ''}
-            <div id="ftv-op-warn" class="ftv-op-warn" style="${this._slideshowUploading ? '' : 'display:none'}">&#9888; Uploading — grid locked</div>
+            <div id="ftv-op-warn" class="ftv-op-warn" style="${(this._slideshowUploading || this._slideshowUserRefreshPending || this._slideshowClearRefreshPending) ? '' : 'display:none'}">${this._slideshowUploading ? '&#9888; Uploading \u2014 grid locked' : (this._slideshowUserRefreshPending || this._slideshowClearRefreshPending) ? '&#9888; Refreshing \u2014 grid locked' : '&#9888; Uploading \u2014 grid locked'}</div>
             <div class="ftv-op-grid" id="ftv-op-grid"></div>
           </div>
           <div class="ftv-controls">
@@ -1494,12 +1540,19 @@ class FrameTVArtCard extends HTMLElement {
               <input class="ftv-input" id="ftv-tv-ip" type="text" placeholder="e.g. 10.83.21.57" />
             </div>
             <div class="ftv-field">
-              <div class="ftv-label">MQTT broker host</div>
-              <input class="ftv-input" id="ftv-mqtt-host" type="text" placeholder="e.g. mosquitto" />
+              <div class="ftv-label" style="display:flex; justify-content:space-between; align-items:center;">
+                <span>MQTT broker host</span>
+                <span style="font-weight:400; color:${mqttConnected ? '#6abf69' : '#e5c07b'};">${mqttConnected ? '● Connected' : '● Unavailable'}</span>
+              </div>
+              <input class="ftv-input" id="ftv-mqtt-host" type="text" placeholder="e.g. 10.0.0.5" />
             </div>
             <div class="ftv-field">
-              <div class="ftv-label">MQTT port</div>
+              <div class="ftv-label">MQTT port <span style="font-weight:400;opacity:0.7;">(TCP, backend)</span></div>
               <input class="ftv-input" id="ftv-mqtt-port" type="number" placeholder="e.g. 1883" />
+            </div>
+            <div class="ftv-field">
+              <div class="ftv-label">WebSocket port <span style="font-weight:400;opacity:0.7;">(browser UI)</span></div>
+              <input class="ftv-input" id="ftv-mqtt-ws-port" type="number" placeholder="e.g. 9001" />
             </div>
             <div class="ftv-field">
               <div class="ftv-label">MQTT username</div>
@@ -1525,6 +1578,7 @@ class FrameTVArtCard extends HTMLElement {
     const inIp = this.querySelector('#ftv-tv-ip');
     const inMqttHost = this.querySelector('#ftv-mqtt-host');
     const inMqttPort = this.querySelector('#ftv-mqtt-port');
+    const inMqttWsPort = this.querySelector('#ftv-mqtt-ws-port');
     const inMqttUser = this.querySelector('#ftv-mqtt-user');
     const inMqttPass = this.querySelector('#ftv-mqtt-pass');
     const btnApplyEnv = this.querySelector('#ftv-apply-env');
@@ -1554,6 +1608,7 @@ class FrameTVArtCard extends HTMLElement {
         String(inIp?.value||'') !== String(envBaseline.SAMSUNG_TV_ART_TV_IP||'') ||
         String(inMqttHost?.value||'') !== String(envBaseline.SAMSUNG_TV_ART_MQTT_HOST||'') ||
         String(inMqttPort?.value||'') !== String(envBaseline.SAMSUNG_TV_ART_MQTT_PORT||'') ||
+        String(inMqttWsPort?.value||'') !== String(envBaseline.SAMSUNG_TV_ART_MQTT_WS_PORT||'') ||
         String(inMqttUser?.value||'') !== String(envBaseline.SAMSUNG_TV_ART_MQTT_USERNAME||'') ||
         (inMqttPass?.value||'').length > 0
       );
@@ -1568,14 +1623,16 @@ class FrameTVArtCard extends HTMLElement {
           SAMSUNG_TV_ART_TV_IP: attrs.SAMSUNG_TV_ART_TV_IP || '',
           SAMSUNG_TV_ART_MQTT_HOST: attrs.SAMSUNG_TV_ART_MQTT_HOST || '',
           SAMSUNG_TV_ART_MQTT_PORT: attrs.SAMSUNG_TV_ART_MQTT_PORT || '',
+          SAMSUNG_TV_ART_MQTT_WS_PORT: attrs.SAMSUNG_TV_ART_MQTT_WS_PORT || '',
           SAMSUNG_TV_ART_MQTT_USERNAME: attrs.SAMSUNG_TV_ART_MQTT_USERNAME || '',
         };
         if (inIp) inIp.value = envBaseline.SAMSUNG_TV_ART_TV_IP;
         if (inMqttHost) inMqttHost.value = envBaseline.SAMSUNG_TV_ART_MQTT_HOST;
         if (inMqttPort) inMqttPort.value = envBaseline.SAMSUNG_TV_ART_MQTT_PORT;
+        if (inMqttWsPort) inMqttWsPort.value = envBaseline.SAMSUNG_TV_ART_MQTT_WS_PORT;
         if (inMqttUser) inMqttUser.value = envBaseline.SAMSUNG_TV_ART_MQTT_USERNAME;
         envDirty();
-        // Disable action buttons when TV is not in Art Mode
+        // Disable action buttons during standby (refresh in progress or TV not in Art Mode)
         const tvBlocked = !!this._isStandbyLike;
         if (btnRestartEnv) btnRestartEnv.disabled = tvBlocked;
         if (btnSyncCollections) btnSyncCollections.disabled = tvBlocked;
@@ -1588,8 +1645,15 @@ class FrameTVArtCard extends HTMLElement {
         const opSettingsApplyBtn = this.querySelector('#ftv-op-settings-apply');
         if ((tvBlocked || this._refreshInProgress) && opSettingsApplyBtn) opSettingsApplyBtn.disabled = true;
         if (envMsg) {
-          if (tvBlocked) envMsg.textContent = 'TV is not in Art Mode — buttons unavailable.';
-          else if (envMsg.textContent === 'TV is not in Art Mode — buttons unavailable.') envMsg.textContent = '';
+          const _blockedMsg = this._refreshInProgress
+            ? 'Artwork loading in progress — buttons unavailable.'
+            : this._isNotInArtMode
+              ? 'TV is not in Art Mode — buttons unavailable.'
+              : tvBlocked
+                ? 'TV is not ready — buttons unavailable.'
+                : '';
+          if (tvBlocked) envMsg.textContent = _blockedMsg;
+          else if (envMsg.textContent.endsWith('buttons unavailable.')) envMsg.textContent = '';
         }
       } catch (_) {}
     };
@@ -1796,6 +1860,7 @@ class FrameTVArtCard extends HTMLElement {
     if (inIp) inIp.addEventListener('input', envDirty);
     if (inMqttHost) inMqttHost.addEventListener('input', envDirty);
     if (inMqttPort) inMqttPort.addEventListener('input', envDirty);
+    if (inMqttWsPort) inMqttWsPort.addEventListener('input', envDirty);
     if (inMqttUser) inMqttUser.addEventListener('input', envDirty);
     if (inMqttPass) inMqttPass.addEventListener('input', envDirty);
     if (btnApplyEnv) btnApplyEnv.addEventListener('click', async (e) => {
@@ -1805,7 +1870,12 @@ class FrameTVArtCard extends HTMLElement {
         const payload = {
           SAMSUNG_TV_ART_TV_IP: String(inIp?.value||'').trim(),
           SAMSUNG_TV_ART_MQTT_HOST: String(inMqttHost?.value||'').trim(),
+          // Set WS_HOST to the same broker address so the standalone web UI also connects correctly.
+          // The web UI connects via WebSocket and uses MQTT_WS_HOST (not MQTT_HOST, which may be
+          // a Docker-internal service name unreachable from browsers).
+          SAMSUNG_TV_ART_MQTT_WS_HOST: String(inMqttHost?.value||'').trim(),
           SAMSUNG_TV_ART_MQTT_PORT: String(inMqttPort?.value||'').trim(),
+          SAMSUNG_TV_ART_MQTT_WS_PORT: String(inMqttWsPort?.value||'').trim(),
           SAMSUNG_TV_ART_MQTT_USERNAME: String(inMqttUser?.value||'').trim(),
         };
         if (inMqttPass?.value) payload.SAMSUNG_TV_ART_MQTT_PASSWORD = inMqttPass.value;
@@ -1872,12 +1942,15 @@ class FrameTVArtCard extends HTMLElement {
           updated: Date.now(),
         };
         this._syncRefreshAckStatus();
+        // Lock grid and spin button immediately, before the async publish
+        this._slideshowUserRefreshPending = true;
+        btnRefresh.classList.add('spinning');
+        btnRefresh.disabled = true;
+        if (this._overridePanelOpen) this._renderOverrideGrid();
         if (this._hass) {
           await this._hass.callService('mqtt', 'publish', { topic: this._config.refresh_cmd_topic, payload: JSON.stringify({ req_id: reqId }), qos: 1, retain: false });
         }
         if (envMsg) envMsg.textContent = 'Requested collections refresh...';
-        btnRefresh.classList.add('spinning');
-        btnRefresh.disabled = true;
       } catch (err) {
         setStatus('Refresh failed to send. Check MQTT integration/service.', 8000);
       }
@@ -2064,7 +2137,7 @@ class FrameTVArtCard extends HTMLElement {
     const atMax = this._slideshowSelected.size >= this._slideshowMaxUploads;
     const { file: _curFile } = this._getSelectedData();
     const _standby = !_curFile || ['standby.png','unknown','unavailable','none',''].includes(String(_curFile).trim().toLowerCase());
-    const locked = this._slideshowUploading || (_standby && this._slideshowMode !== 'override');
+    const locked = this._slideshowUploading || this._slideshowUserRefreshPending || this._slideshowClearRefreshPending || (_standby && this._slideshowMode !== 'override');
     const basePath = this._getBaseImagePath();
     // Group unselected by artist/folder
     const groups = {};
@@ -2140,9 +2213,9 @@ class FrameTVArtCard extends HTMLElement {
     if (warnEl) {
       const { file: _wf } = this._getSelectedData();
       const _wStandby = !_wf || ['standby.png','unknown','unavailable','none',''].includes(String(_wf).trim().toLowerCase());
-      const _wLocked = this._slideshowUploading || (_wStandby && this._slideshowMode !== 'override');
+      const _wLocked = this._slideshowUploading || this._slideshowUserRefreshPending || this._slideshowClearRefreshPending || (_wStandby && this._slideshowMode !== 'override');
       warnEl.style.display = _wLocked ? '' : 'none';
-      warnEl.textContent = this._slideshowUploading ? '\u26a0 Uploading \u2014 grid locked' : '\u26a0 Standby \u2014 grid locked';
+      warnEl.textContent = this._slideshowUploading ? '\u26a0 Uploading \u2014 grid locked' : (this._slideshowUserRefreshPending || this._slideshowClearRefreshPending) ? '\u26a0 Refreshing \u2014 grid locked' : '\u26a0 Standby \u2014 grid locked';
     }
     const resetBtn = this.querySelector('#ftv-op-reset');
     if (resetBtn) resetBtn.style.display = this._selectionMatchesBaseline() ? 'none' : '';
@@ -2166,7 +2239,7 @@ class FrameTVArtCard extends HTMLElement {
     }
   }
 
-console.info('%c FRAME-TV-ART-CARD %c v0.2.2-beta.1 ', 'color: white; background: #03a9f4; font-weight: bold;', '');
+console.info('%c FRAME-TV-ART-CARD %c v0.2.2-beta.2 ', 'color: white; background: #03a9f4; font-weight: bold;', '');
 
 // Register custom element so Lovelace can use <frame-tv-art-card>
 try {

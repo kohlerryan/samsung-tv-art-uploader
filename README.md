@@ -8,11 +8,11 @@ Built on top of [NickWaterton/samsung-tv-ws-api](https://github.com/NickWaterton
 
 | Home Assistant Card | Web UI |
 |---|---|
-| ![HA Card](assets/hacard_fixed_v0.2.1.png) | ![Web UI](assets/webui_now_showing_v0.2.3.png) |
+| ![HA Card](assets/hacard_fixed_v0.2.1.png) | ![Web UI](assets/webui_now_showing_v0.2.2.png) |
 
 > **Upgrading from v0.1.x?** See the [v0.2.0 release notes](https://github.com/kohlerryan/samsung-tv-art-uploader/releases/tag/v0.2.0) for breaking changes and what's new.
 
-> **Upgrading from v0.2.x?** See the [v0.2.3-beta.1 release notes](https://github.com/kohlerryan/samsung-tv-art-uploader/releases/tag/v0.2.3-beta.1) for what's new.
+> **Upgrading from v0.2.x?** See the [v0.2.3-beta.2 release notes](https://github.com/kohlerryan/samsung-tv-art-uploader/releases/tag/v0.2.3-beta.2) for what's new.
 
 ## Features
 
@@ -141,21 +141,35 @@ your-collection-repo/
   Monet_1877_Gare_Saint_Lazare.jpg
 ```
 
-Set `SAMSUNG_TV_ART_COLLECTIONS` in your env file as a space- or comma-separated list of URLs:
+#### Selecting collections from the web UI (recommended)
+
+The easiest way to manage collections is via the **Settings → Collections** tab in the web UI. All 54 available artist collections from [github.com/kohlerryan](https://github.com/kohlerryan?tab=repositories) are listed as checkboxes — check the ones you want, hit **Save List**, then click **Update & Refresh** to fetch and seed the TV.
+
+Custom or third-party repository URLs can be pasted into the **Custom Repositories** text area below the checkbox grid, one URL per line.
+
+#### Without the web UI (env file / headless)
+
+In headless setups, set `SAMSUNG_TV_ART_COLLECTIONS` in your env file as a space- or comma-separated list of URLs:
 
 ```env
-SAMSUNG_TV_ART_COLLECTIONS=https://github.com/you/Monet.git https://github.com/you/Degas.git
+SAMSUNG_TV_ART_COLLECTIONS=https://github.com/kohlerryan/Claude_Monet.git https://github.com/kohlerryan/Albert_Bierstadt.git
 ```
 
-> **Note:** `.env` files do not support multiline values. If you have many repos, use a `collections.list` file instead (see below).
+> **Note:** `.env` files do not support multiline values. For many repos, create a `data/collections.list` file with one URL per line — this file takes effect automatically without a container restart:
+
+```
+https://github.com/kohlerryan/Claude_Monet.git
+https://github.com/kohlerryan/Albert_Bierstadt.git
+https://github.com/kohlerryan/Vincent_van_Gogh.git
+```
+
+> Save this as `data/collections.list` in the directory where you run `docker compose`. The `data/` folder is already bind-mounted by the default compose file. The web UI writes this file automatically when you save from the Settings tab.
 
 Click **Update & Refresh** in the web UI or HA card to fetch the latest commits and re-seed the TV at any time.
 
-#### Ready-made artist collections
+#### Available official collections
 
-A set of pre-built, ready-to-use artist collections is available at **[github.com/kohlerryan](https://github.com/kohlerryan?tab=repositories)**. Each repo follows the required structure and includes a fully populated `artwork_data.csv`.
-
-Available collections:
+All 54 collections below are available as checkboxes in the web UI Settings tab. For headless use, their URLs follow the pattern `https://github.com/kohlerryan/<Repository>.git`.
 
 | Repository | Artist |
 |---|---|
@@ -214,72 +228,7 @@ Available collections:
 | [Vincent_van_Gogh](https://github.com/kohlerryan/Vincent_van_Gogh) | Vincent van Gogh |
 | [Winslow_Homer](https://github.com/kohlerryan/Winslow_Homer) | Winslow Homer |
 
-To use any of these, add their URLs to `SAMSUNG_TV_ART_COLLECTIONS` as a space-separated list. For example, to display Monet and Bierstadt:
 
-```env
-SAMSUNG_TV_ART_COLLECTIONS=https://github.com/kohlerryan/Claude_Monet.git https://github.com/kohlerryan/Albert_Bierstadt.git
-```
-
-For many collections, the env var approach gets unwieldy. Instead, create a `data/collections.list` file with one URL per line — this file takes effect automatically and supports as many repos as you like:
-
-```
-https://github.com/kohlerryan/Abbott_Handerson_Thayer.git
-https://github.com/kohlerryan/Adalbert_Stifter.git
-https://github.com/kohlerryan/Akseli_Gallen-Kallela.git
-https://github.com/kohlerryan/Albert_Bierstadt.git
-https://github.com/kohlerryan/Alfred_Sisley.git
-https://github.com/kohlerryan/Alphonse_Mucha.git
-https://github.com/kohlerryan/Andy_Warhol.git
-https://github.com/kohlerryan/Antoine_Chintreuil.git
-https://github.com/kohlerryan/Arthur_Streeton.git
-https://github.com/kohlerryan/Banksy.git
-https://github.com/kohlerryan/Berthe_Morisot.git
-https://github.com/kohlerryan/Camille_Pissarro.git
-https://github.com/kohlerryan/Charles_Marion_Russell.git
-https://github.com/kohlerryan/Childe_Hassam.git
-https://github.com/kohlerryan/Claude_Monet.git
-https://github.com/kohlerryan/Diego_Velazquez.git
-https://github.com/kohlerryan/Edgar_Degas.git
-https://github.com/kohlerryan/Edouard_Manet.git
-https://github.com/kohlerryan/Edvard_Munch.git
-https://github.com/kohlerryan/Edward_Hopper.git
-https://github.com/kohlerryan/El_Greco.git
-https://github.com/kohlerryan/Eugene_Boudin.git
-https://github.com/kohlerryan/Eugene_Delacroix.git
-https://github.com/kohlerryan/Francois_Boucher.git
-https://github.com/kohlerryan/Franz_Marc.git
-https://github.com/kohlerryan/Frederic_Remington.git
-https://github.com/kohlerryan/Frederick_McCubbin.git
-https://github.com/kohlerryan/George_Stubbs.git
-https://github.com/kohlerryan/George_Wesley_Bellows.git
-https://github.com/kohlerryan/Georges_Seurat.git
-https://github.com/kohlerryan/Gustav_Courbet.git
-https://github.com/kohlerryan/Gustav_Klimt.git
-https://github.com/kohlerryan/Gustave_Caillebotte.git
-https://github.com/kohlerryan/Henri_de_Toulouse-Lautrec.git
-https://github.com/kohlerryan/Henri_Matisse.git
-https://github.com/kohlerryan/Henri_Rousseau.git
-https://github.com/kohlerryan/Jackson_Pollock.git
-https://github.com/kohlerryan/Jacob_Maris.git
-https://github.com/kohlerryan/Keith_Haring.git
-https://github.com/kohlerryan/Leonardo_da_Vinci.git
-https://github.com/kohlerryan/Marc_Chagall.git
-https://github.com/kohlerryan/Mark_Rothko.git
-https://github.com/kohlerryan/Mary_Cassatt.git
-https://github.com/kohlerryan/Max_Ernst.git
-https://github.com/kohlerryan/Norman_Rockwell.git
-https://github.com/kohlerryan/Pablo_Picasso.git
-https://github.com/kohlerryan/Paul_Cezanne.git
-https://github.com/kohlerryan/Paul_Gauguin.git
-https://github.com/kohlerryan/Paul_Klee.git
-https://github.com/kohlerryan/Pierre-Auguste_Renoir.git
-https://github.com/kohlerryan/Rembrandt_Harmenszoon_van_Rijn.git
-https://github.com/kohlerryan/Sandro_Botticelli.git
-https://github.com/kohlerryan/Vincent_van_Gogh.git
-https://github.com/kohlerryan/Winslow_Homer.git
-```
-
-> Save this as `data/collections.list` in the directory where you run `docker compose`. The `data/` folder is already bind-mounted by the default compose file.
 
 ### Option B — Local bind-mount
 
@@ -319,8 +268,9 @@ Key variables:
 | `SAMSUNG_TV_ART_COLLECTIONS_FROM_CSV` | `true` | Use `artwork_data.csv` inside each collection folder to show friendly artist/collection names in the UI dropdown. Set to `false` to show raw folder names instead |
 | `SAMSUNG_TV_ART_LOCAL_WEB` | `true` | Enable the web UI on port 8080 |
 | `SAMSUNG_TV_ART_MDNS_ENABLE` | `true` | Advertise via mDNS as `<hostname>.local` — requires host, macvlan, or macvlan+bridge networking |
-| `SAMSUNG_TV_ART_MODE_CHECK_SECONDS` | `5` | How often (in seconds) the uploader polls the TV to detect Art Mode changes. Lower = faster UI response when toggling Art Mode on/off. If you have this set to a high value (e.g. `600`) in your env file, the web UI and HA card will be slow to react — remove it or set it to `5` for near-instant detection. |
-| `SAMSUNG_TV_ART_MAX_FILE_BYTES` | _(unset)_ | **2019 Frame TV and older models only.** These TVs reject uploads over ~1 MB with error `-1`. Set this to the maximum encoded image size in bytes and the uploader will progressively JPEG-compress any image that exceeds it. Recommended: `900000`. Leave unset on modern TVs — no recompression is applied by default. |
+| `SAMSUNG_TV_ART_MODE_CHECK_SECONDS` | `5` | How often (in seconds) the uploader polls the TV as a fallback to confirm Art Mode state. Art Mode changes are now detected instantly via WebSocket events (`go_to_standby`, `art_mode_changed`, `wakeup`), so the poll interval no longer affects response time. The default of `5` is fine; you can raise it safely if you want less TV chatter. |
+| `SAMSUNG_TV_ART_MAX_FILE_BYTES` | _(unset)_ | **2019 Frame TV and older models only.** These TVs reject uploads over ~750–800 KB with error `-1`. Set this to the maximum encoded image size in bytes; the uploader will progressively JPEG-compress any image that exceeds it. If quality reduction alone can't shrink the file enough, the image is also scaled down to half resolution and compression retried. Recommended: `800000`. Leave unset on modern TVs — no recompression is applied by default. |
+| `SAMSUNG_TV_ART_MAX_DIMENSION` | _(unset)_ | **2019 / 1080p Frame TV only.** Caps the maximum image resolution before upload, e.g. `1920x1080`. Accepts `WxH` or a single number for a square cap. Useful when the TV rejects images purely because of their pixel size even if the file size is within the byte limit. |
 
 See `examples/samsung-tv-art.env.example` for the full list with descriptions.
 
@@ -330,11 +280,11 @@ When `SAMSUNG_TV_ART_LOCAL_WEB=true`, a web interface is available at `http://sa
 
 | Now Showing | Settings |
 |---|---|
-| ![Web UI Now Showing](assets/webui_now_showing_v0.2.3.png) | ![Web UI Settings](assets/webui_settings_v0.2.3.png) |
+| ![Web UI Now Showing](assets/webui_now_showing_v0.2.2.png) | ![Web UI Settings](assets/webui_settings_v0.2.3.png) |
 
 | Slideshow Override | Mobile |
 |---|---|
-| ![Web UI Slideshow](assets/webui_slideshow_v0.2.3.png) | ![Web UI Mobile](assets/webui_mobile_now_showing_v0.2.3.png) |
+| ![Web UI Slideshow](assets/webui_slideshow_v0.2.2.png) | ![Web UI Mobile](assets/webui_mobile_now_showing_v0.2.2.png) |
 
 - **Collections** tab — select which collections are active and trigger a refresh
 - **Slideshow** tab — pick a fixed set of images to pin to the TV (Override mode), or configure the rotation interval and upload limit
@@ -354,7 +304,7 @@ See [`ha-card/README.md`](ha-card/README.md) for installation steps and [`exampl
 
 | Card — Slideshow Override | Card — Settings |
 |---|---|
-| ![HA Card Slideshow](assets/hacard_slideshow_v0.2.1.png) | ![HA Card Settings](assets/hacard_settings_v0.2.1.png) |
+| ![HA Card Slideshow](assets/hacard_slideshow_v0.2.1.png) | ![HA Card Settings](assets/hacard_settings_v0.2.2.png) |
 
 ### Mixed-content / image URLs
 
@@ -413,10 +363,10 @@ samsung-tv-art/
 │   ├── hacard_dynamic_v0.2.1.png                        — HA card dynamic layout
 │   ├── hacard_fixed_art_details_v0.2.1.png              — HA card fixed layout art detail overlay
 │   ├── hacard_slideshow_v0.2.1.png                      — HA card slideshow override panel
-│   ├── hacard_settings_v0.2.1.png                       — HA card settings panel
-│   ├── webui_now_showing_v0.2.3.png                     — web UI now showing tab
-│   ├── webui_mobile_now_showing_v0.2.3.png              — web UI mobile now showing
-│   ├── webui_slideshow_v0.2.3.png                       — web UI slideshow tab
+│   ├── hacard_settings_v0.2.2.png                       — HA card settings panel
+│   ├── webui_now_showing_v0.2.2.png                     — web UI now showing tab
+│   ├── webui_mobile_now_showing_v0.2.2.png              — web UI mobile now showing
+│   ├── webui_slideshow_v0.2.2.png                       — web UI slideshow tab
 │   └── webui_settings_v0.2.3.png                        — web UI settings tab
 ├── ha-card/
 │   ├── samsung-tv-art-card.js   — Home Assistant Lovelace card
