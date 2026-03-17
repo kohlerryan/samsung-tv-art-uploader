@@ -12,7 +12,7 @@ Built on top of [NickWaterton/samsung-tv-ws-api](https://github.com/NickWaterton
 
 > **Upgrading from v0.1.x?** See the [v0.2.0 release notes](https://github.com/kohlerryan/samsung-tv-art-uploader/releases/tag/v0.2.0) for breaking changes and what's new.
 
-> **Upgrading from v0.2.x?** See the [v0.2.2 release notes](https://github.com/kohlerryan/samsung-tv-art-uploader/releases/tag/v0.2.2) for what's new.
+> **Upgrading from v0.2.x?** See the [v0.2.3-beta.1 release notes](https://github.com/kohlerryan/samsung-tv-art-uploader/releases/tag/v0.2.3-beta.1) for what's new.
 
 ## Features
 
@@ -190,17 +190,25 @@ Available collections:
 | [George_Wesley_Bellows](https://github.com/kohlerryan/George_Wesley_Bellows) | George Wesley Bellows |
 | [Georges_Seurat](https://github.com/kohlerryan/Georges_Seurat) | Georges Seurat |
 | [Gustav_Courbet](https://github.com/kohlerryan/Gustav_Courbet) | Gustav Courbet |
+| [Gustav_Klimt](https://github.com/kohlerryan/Gustav_Klimt) | Gustav Klimt |
 | [Gustave_Caillebotte](https://github.com/kohlerryan/Gustave_Caillebotte) | Gustave Caillebotte |
+| [Henri_de_Toulouse-Lautrec](https://github.com/kohlerryan/Henri_de_Toulouse-Lautrec) | Henri de Toulouse-Lautrec |
 | [Henri_Matisse](https://github.com/kohlerryan/Henri_Matisse) | Henri Matisse |
+| [Henri_Rousseau](https://github.com/kohlerryan/Henri_Rousseau) | Henri Rousseau |
 | [Jackson_Pollock](https://github.com/kohlerryan/Jackson_Pollock) | Jackson Pollock |
+| [Jacob_Maris](https://github.com/kohlerryan/Jacob_Maris) | Jacob Maris |
 | [Keith_Haring](https://github.com/kohlerryan/Keith_Haring) | Keith Haring |
 | [Leonardo_da_Vinci](https://github.com/kohlerryan/Leonardo_da_Vinci) | Leonardo da Vinci |
+| [Marc_Chagall](https://github.com/kohlerryan/Marc_Chagall) | Marc Chagall |
 | [Mark_Rothko](https://github.com/kohlerryan/Mark_Rothko) | Mark Rothko |
 | [Mary_Cassatt](https://github.com/kohlerryan/Mary_Cassatt) | Mary Cassatt |
 | [Max_Ernst](https://github.com/kohlerryan/Max_Ernst) | Max Ernst |
+| [Norman_Rockwell](https://github.com/kohlerryan/Norman_Rockwell) | Norman Rockwell |
 | [Pablo_Picasso](https://github.com/kohlerryan/Pablo_Picasso) | Pablo Picasso |
 | [Paul_Cezanne](https://github.com/kohlerryan/Paul_Cezanne) | Paul Cézanne |
 | [Paul_Gauguin](https://github.com/kohlerryan/Paul_Gauguin) | Paul Gauguin |
+| [Paul_Klee](https://github.com/kohlerryan/Paul_Klee) | Paul Klee |
+| [Pierre-Auguste_Renoir](https://github.com/kohlerryan/Pierre-Auguste_Renoir) | Pierre-Auguste Renoir |
 | [Rembrandt_Harmenszoon_van_Rijn](https://github.com/kohlerryan/Rembrandt_Harmenszoon_van_Rijn) | Rembrandt van Rijn |
 | [Sandro_Botticelli](https://github.com/kohlerryan/Sandro_Botticelli) | Sandro Botticelli |
 | [Vincent_van_Gogh](https://github.com/kohlerryan/Vincent_van_Gogh) | Vincent van Gogh |
@@ -246,17 +254,25 @@ https://github.com/kohlerryan/George_Stubbs.git
 https://github.com/kohlerryan/George_Wesley_Bellows.git
 https://github.com/kohlerryan/Georges_Seurat.git
 https://github.com/kohlerryan/Gustav_Courbet.git
+https://github.com/kohlerryan/Gustav_Klimt.git
 https://github.com/kohlerryan/Gustave_Caillebotte.git
+https://github.com/kohlerryan/Henri_de_Toulouse-Lautrec.git
 https://github.com/kohlerryan/Henri_Matisse.git
+https://github.com/kohlerryan/Henri_Rousseau.git
 https://github.com/kohlerryan/Jackson_Pollock.git
+https://github.com/kohlerryan/Jacob_Maris.git
 https://github.com/kohlerryan/Keith_Haring.git
 https://github.com/kohlerryan/Leonardo_da_Vinci.git
+https://github.com/kohlerryan/Marc_Chagall.git
 https://github.com/kohlerryan/Mark_Rothko.git
 https://github.com/kohlerryan/Mary_Cassatt.git
 https://github.com/kohlerryan/Max_Ernst.git
+https://github.com/kohlerryan/Norman_Rockwell.git
 https://github.com/kohlerryan/Pablo_Picasso.git
 https://github.com/kohlerryan/Paul_Cezanne.git
 https://github.com/kohlerryan/Paul_Gauguin.git
+https://github.com/kohlerryan/Paul_Klee.git
+https://github.com/kohlerryan/Pierre-Auguste_Renoir.git
 https://github.com/kohlerryan/Rembrandt_Harmenszoon_van_Rijn.git
 https://github.com/kohlerryan/Sandro_Botticelli.git
 https://github.com/kohlerryan/Vincent_van_Gogh.git
@@ -304,6 +320,7 @@ Key variables:
 | `SAMSUNG_TV_ART_LOCAL_WEB` | `true` | Enable the web UI on port 8080 |
 | `SAMSUNG_TV_ART_MDNS_ENABLE` | `true` | Advertise via mDNS as `<hostname>.local` — requires host, macvlan, or macvlan+bridge networking |
 | `SAMSUNG_TV_ART_MODE_CHECK_SECONDS` | `5` | How often (in seconds) the uploader polls the TV to detect Art Mode changes. Lower = faster UI response when toggling Art Mode on/off. If you have this set to a high value (e.g. `600`) in your env file, the web UI and HA card will be slow to react — remove it or set it to `5` for near-instant detection. |
+| `SAMSUNG_TV_ART_MAX_FILE_BYTES` | _(unset)_ | **2019 Frame TV and older models only.** These TVs reject uploads over ~1 MB with error `-1`. Set this to the maximum encoded image size in bytes and the uploader will progressively JPEG-compress any image that exceeds it. Recommended: `900000`. Leave unset on modern TVs — no recompression is applied by default. |
 
 See `examples/samsung-tv-art.env.example` for the full list with descriptions.
 

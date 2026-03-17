@@ -1,0 +1,9 @@
+# Radxa headless first-boot configuration
+# Place this file on the boot partition of the flashed SD card alongside before.txt.
+# On first boot the OS will apply these settings and then remove this file.
+#
+# Change the password before flashing — this is the password for the radxa user.
+
+hostname=samsung-tv-art
+username=radxa
+password=changeme

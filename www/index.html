@@ -228,6 +228,7 @@
     .ftv-option.selected .ftv-checkbox { background: #2f7fbf; border-color: #2f7fbf; }
     .ftv-checkbox svg { width: 14px; height: 14px; fill: white; opacity: 0; }
     .ftv-option.selected .ftv-checkbox svg { opacity: 1; }
+    .ftv-option-all { border-bottom: 1px solid #4a3d37; font-weight: 600; }
     .ftv-apply, .ftv-clear { width: 40px; height: 40px; border: none; border-radius: 8px; display: flex; align-items: center; justify-content: center; }
     .ftv-apply { background: #2f7fbf; }
     .ftv-clear { background: #8b3a3a; }
@@ -292,6 +293,14 @@
               <input type="checkbox" id="preload-toggle" style="width:16px; height:16px; cursor:pointer; accent-color:#2f7fbf;">
               Preload thumbnails (fetch all images on open instead of lazily)
             </label>
+          </div>
+          <div style="margin-top:14px;">
+            <div class="hint" style="margin-bottom:6px;">Collections list &mdash; one git URL per line (used by &ldquo;Update &amp; Refresh&rdquo;). Lines starting with # are comments.</div>
+            <textarea id="collections-list-input" spellcheck="false" style="width:100%; box-sizing:border-box; min-height:140px; padding:10px; background:#2a2623; color:#f2eee9; border:1px solid #4a3d37; border-radius:8px; font-family:monospace; font-size:12px; resize:vertical;"></textarea>
+            <div style="display:flex; gap:8px; margin-top:6px; align-items:center;">
+              <button id="collections-list-save" disabled style="opacity:0.6;">Save List</button>
+              <span id="collections-list-msg" class="hint"></span>
+            </div>
           </div>
         </div>
         <div id="viewSlideshow" style="display:none; flex: 1; min-height: 0; overflow-y: auto;">
@@ -579,15 +588,22 @@
       const showClear = staged.length > 0;
       if ($apply) {
         const visible = showApply || applyPending;
-        $apply.disabled = !showApply || tvBlocked || applyPending;
-        $apply.style.opacity = (visible && !tvBlocked) ? 1 : 0.6;
+        const applyDisabled = !showApply || staged.length === 0 || applyPending;
+        $apply.disabled = applyDisabled;
+        $apply.style.opacity = (visible && !applyDisabled) ? 1 : 0.6;
         $apply.style.display = visible ? 'flex' : 'none';
       }
       if ($clear) {
-        const clearBlocked = tvBlocked || refreshInProgress;
+        const clearBlocked = refreshInProgress || applyPending;
         $clear.disabled = !showClear || clearBlocked;
         $clear.style.opacity = clearBlocked ? 0.5 : '';
         $clear.style.display = showClear ? 'flex' : 'none';
+      }
+      // Disable refresh whenever a collections apply is pending or selections are dirty (checkmark visible)
+      if ($refresh && !refreshInProgress) {
+        const refreshBlocked = tvBlocked || dirty || applyPending;
+        $refresh.disabled = refreshBlocked;
+        $refresh.style.opacity = refreshBlocked ? '0.5' : '';
       }
 
       // On small screens (iPhone portrait and similar), put refresh/apply/clear on the same line and size dynamically
@@ -618,7 +634,15 @@
       const sel = options.filter(o => setApplied.has(o)).sort();
       const uns = options.filter(o => !setApplied.has(o)).sort();
       const sorted = sel.concat(uns);
-      $dropdown.innerHTML = sorted.map(o => `
+      const allSelected = sorted.length > 0 && sorted.every(o => setStage.has(o));
+      $dropdown.innerHTML = `
+        <div class="ftv-option ftv-option-all ${allSelected ? 'selected' : ''}" data-value="__select_all__">
+          <div class="ftv-checkbox">
+            <svg viewBox="0 0 24 24"><path d="M9,20.42L2.79,14.21L5.62,11.38L9,14.77L18.88,4.88L21.71,7.71L9,20.42Z"/></svg>
+          </div>
+          <span>Select All</span>
+        </div>
+      ` + sorted.map(o => `
         <div class="ftv-option ${setStage.has(o) ? 'selected' : ''}" data-value="${o}">
           <div class="ftv-checkbox">
             <svg viewBox="0 0 24 24"><path d="M9,20.42L2.79,14.21L5.62,11.38L9,14.77L18.88,4.88L21.71,7.71L9,20.42Z"/></svg>
@@ -630,11 +654,19 @@
         opt.addEventListener('click', (e) => {
           e.stopPropagation();
           const val = opt.dataset.value;
-          if (setStage.has(val)) setStage.delete(val); else setStage.add(val);
+          if (val === '__select_all__') {
+            const allSel = sorted.every(o => setStage.has(o));
+            if (allSel) { setStage.clear(); } else { sorted.forEach(o => setStage.add(o)); }
+          } else {
+            if (setStage.has(val)) setStage.delete(val); else setStage.add(val);
+          }
           staged = Array.from(setStage);
           updateButtons();
           syncTriggerText();
           renderOptions();
+          // Immediately request available files for the staged collections so the
+          // slideshow grid shows files from new (not-yet-applied) collections.
+          if (dirty) requestSlideshowAvailable(staged);
         });
       });
     }
@@ -684,9 +716,8 @@
     function stopRefreshSpinner() {
       if ($refresh) {
         $refresh.classList.remove('spinning');
-        if (!tvBlocked) { $refresh.disabled = false; $refresh.style.opacity = ''; }
       }
-      updateButtons(); // re-evaluate trash can state now that refreshInProgress is clearing
+      updateButtons(); // re-evaluate all button states including refresh
     }
 
     function resetApplyBtn() {
@@ -883,7 +914,7 @@
     }
     if ($apply) {
       $apply.onclick = () => {
-        if (!dirty || applyPending || tvBlocked) return;
+        if (!dirty || applyPending || staged.length === 0) return;
         client.publish(`${TOPIC_CMD_PREFIX}/collections/set`, JSON.stringify({ collections: staged, req_id: Date.now() }));
         baseline = staged.slice();
         // Clear the grid selection and mark a user-triggered refresh so the post-upload
@@ -895,6 +926,7 @@
         $apply.classList.add('apply-pending');
         _applyPendingTimer = setTimeout(resetApplyBtn, 10000);
         updateButtons();
+        updateGridLock(); // lock grid immediately; stays locked until post-reseed available arrives
         syncTriggerText();
       };
     }
@@ -920,6 +952,9 @@
     }
     $tabs.forEach(t => t.addEventListener('click', () => {
       show(t.dataset.tab);
+      if (t.dataset.tab === 'settings') {
+        _loadCollectionsList();
+      }
       if (t.dataset.tab === 'slideshow') {
         requestSlideshowAvailable();
         // Re-seed selection if nothing is selected (happens after an auto-cycle upload
@@ -1044,7 +1079,56 @@
       client.publish(`${TOPIC_CMD_PREFIX}/settings/sync_collections`, JSON.stringify({ req_id: reqId }), { qos: 1, retain: false });
       setTimeout(() => { $syncCollections.textContent = 'Update & Refresh'; $syncCollections.disabled = false; }, 8000);
     };
-    // Expose availability-toggle so setInfo can disable buttons when TV is not in Art Mode
+
+    // --- Collections list editor ---
+    const $collListInput = document.getElementById('collections-list-input');
+    const $collListSave  = document.getElementById('collections-list-save');
+    const $collListMsg   = document.getElementById('collections-list-msg');
+    let _collListBaseline = '';
+    function _collListMarkDirty() {
+      const changed = $collListInput.value !== _collListBaseline;
+      $collListSave.disabled = !changed;
+      $collListSave.style.opacity = changed ? 1 : 0.6;
+    }
+    async function _loadCollectionsList() {
+      try {
+        const res = await fetch('/api/collections-list', { cache: 'no-store' });
+        if (res.ok) {
+          const j = await res.json();
+          _collListBaseline = j.content || '';
+          $collListInput.value = _collListBaseline;
+          _collListMarkDirty();
+        }
+      } catch (_) {}
+    }
+    if ($collListInput) {
+      $collListInput.addEventListener('input', _collListMarkDirty);
+      _loadCollectionsList();
+    }
+    if ($collListSave) {
+      $collListSave.onclick = async () => {
+        $collListSave.disabled = true; $collListSave.style.opacity = 0.6;
+        $collListMsg.textContent = 'Saving\u2026';
+        try {
+          const res = await fetch('/api/collections-list', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content: $collListInput.value }),
+          });
+          const j = await res.json();
+          if (j.ok) {
+            _collListBaseline = $collListInput.value;
+            $collListMsg.textContent = 'Saved. Click \u201cUpdate & Refresh\u201d to pull the updated list.';
+            setTimeout(() => { $collListMsg.textContent = ''; }, 5000);
+          } else {
+            $collListMsg.textContent = `Error: ${j.error || 'unknown'}`;
+          }
+        } catch (e) {
+          $collListMsg.textContent = `Error: ${e}`;
+        }
+        _collListMarkDirty();
+      };
+    }
     _updateSettingsBtnState = function(blocked) {
       if (blocked) {
         tvBlocked = true;
@@ -1052,10 +1136,8 @@
         $restartEnv.disabled = true; $restartEnv.style.opacity = 0.5;
         $syncCollections.disabled = true; $syncCollections.style.opacity = 0.5;
         if ($refresh) { $refresh.disabled = true; $refresh.style.opacity = 0.5; }
-        if ($apply) { $apply.disabled = true; $apply.style.opacity = 0.5; }
-        if ($clear) { $clear.disabled = true; $clear.style.opacity = 0.5; }
         if ($slApply) { $slApply.disabled = true; $slApply.style.opacity = 0.5; }
-        if ($envMsg) $envMsg.textContent = 'TV is not in Art Mode \u2014 buttons unavailable.';
+        if ($envMsg) $envMsg.textContent = 'TV is not in Art Mode \u2014 Refresh and Settings unavailable.';
       } else {
         tvBlocked = false;
         markEnvDirty();
@@ -1067,7 +1149,7 @@
         }
         updateButtons();
         markSlSettingsDirty();
-        if ($envMsg && $envMsg.textContent === 'TV is not in Art Mode \u2014 buttons unavailable.') $envMsg.textContent = '';
+        if ($envMsg && $envMsg.textContent === 'TV is not in Art Mode \u2014 Refresh and Settings unavailable.') $envMsg.textContent = '';
       }
     };
 
@@ -1076,8 +1158,13 @@
     const $slInterval   = document.getElementById('sl-interval');
     const $slMaxUploads = document.getElementById('sl-max-uploads');
     const $slApply      = document.getElementById('sl-settings-apply');
-    function requestSlideshowAvailable() {
-      if (client) client.publish(`${TOPIC_CMD_PREFIX}/slideshow/available/request`, JSON.stringify({ req_id: Date.now() }), { qos: 1 });
+    function requestSlideshowAvailable(collections) {
+      if (!client) return;
+      const payload = { req_id: Date.now() };
+      // When previewing a staged collection set, include it so the backend scans
+      // those directories instead of the committed selected_collections.
+      if (collections && collections.length) payload.collections = collections;
+      client.publish(`${TOPIC_CMD_PREFIX}/slideshow/available/request`, JSON.stringify(payload), { qos: 1 });
     }
     let _availRetryTimer = null;
     let _postUploadRefreshTimer = null;       // retries available request after upload completes
@@ -1233,11 +1320,13 @@
     }
 
     function updateGridLock() {
-      const locked = slideshowUploading || (slideshowStandby && slideshowMode !== 'override');
+      // slideshowUserRefreshPending: user clicked Apply (collections) — reseed not yet started.
+      // Keep the grid locked from that click until the post-reseed available arrives.
+      const locked = slideshowUploading || slideshowUserRefreshPending || (slideshowStandby && slideshowMode !== 'override');
       const $warn = document.getElementById('sl-uploading-warn');
       if ($warn) {
         $warn.style.display = locked ? '' : 'none';
-        $warn.textContent = slideshowUploading ? '\u26a0 Uploading \u2014 grid locked' : '\u26a0 Standby \u2014 grid locked';
+        $warn.textContent = slideshowUploading ? '\u26a0 Uploading \u2014 grid locked' : slideshowUserRefreshPending ? '\u26a0 Applying \u2014 grid locked' : '\u26a0 Standby \u2014 grid locked';
       }
       if ($slGrid) { $slGrid.style.pointerEvents = locked ? 'none' : ''; $slGrid.style.opacity = locked ? '0.45' : ''; }
       if ($slOApply && locked) { $slOApply.disabled = true; $slOApply.style.opacity = 0.4; }
@@ -1275,7 +1364,10 @@
         $slOApply.disabled = !canApply;
         $slOApply.style.opacity = canApply ? 1 : (slideshowUploading ? 0.4 : 0.6);
       }
-      if ($slOReset) $slOReset.style.display = selectionMatchesBaseline() ? 'none' : '';
+      if ($slOReset) {
+        const locked = slideshowUploading || slideshowUserRefreshPending || (slideshowStandby && slideshowMode !== 'override');
+        $slOReset.style.display = (locked || selectionMatchesBaseline()) ? 'none' : '';
+      }
     }
 
     function preloadThumbnails(images) {
@@ -1393,7 +1485,12 @@
         $slOApply._applying = true;
         $slOApply.textContent = 'Applying…';
         $slOApply.style.opacity = 0.7;
-        client.publish(`${TOPIC_CMD_PREFIX}/slideshow/override/set`, JSON.stringify({ paths, req_id: Date.now() }), { qos: 1 });
+        // If the collection dropdown has staged (unapplied) changes, include them
+        // in the same payload so both are committed atomically — no separate Apply
+        // (collections) click required.
+        const payload = { paths, req_id: Date.now() };
+        if (dirty && staged.length) payload.collections = staged;
+        client.publish(`${TOPIC_CMD_PREFIX}/slideshow/override/set`, JSON.stringify(payload), { qos: 1 });
         // Safety fallback only — MQTT response will cancel this and set state directly
         $slOApply._restoreTimer = setTimeout(() => {
           $slOApply._applying = false;

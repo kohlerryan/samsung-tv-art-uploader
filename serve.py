@@ -151,11 +151,56 @@ class FallbackHandler(SimpleHTTPRequestHandler):
         except Exception as e:
             self._json(500, {'ok': False, 'error': str(e)})
 
+    def _handle_api_get_collections_list(self):
+        try:
+            with open('/data/collections.list', 'r', encoding='utf-8') as f:
+                content = f.read()
+        except FileNotFoundError:
+            # Fall back to env var for migration: seed the textarea with it
+            content = '\n'.join(os.environ.get('SAMSUNG_TV_ART_COLLECTIONS', '').replace(',', ' ').split()) + '\n'
+            content = content.strip('\n')
+        except Exception as e:
+            self._json(500, {'ok': False, 'error': str(e)})
+            return
+        self._json(200, {'content': content})
+
+    def _handle_api_post_collections_list(self):
+        length = int(self.headers.get('Content-Length', '0') or '0')
+        try:
+            body = self.rfile.read(length).decode('utf-8') if length > 0 else '{}'
+            data = json.loads(body or '{}')
+        except Exception:
+            self._json(400, {'ok': False, 'error': 'invalid json'})
+            return
+        content = data.get('content', '')
+        if not isinstance(content, str):
+            self._json(400, {'ok': False, 'error': 'content must be a string'})
+            return
+        # Basic validation: each non-blank line should look like a URL or comment
+        lines = content.splitlines()
+        for line in lines:
+            stripped = line.strip()
+            if not stripped or stripped.startswith('#'):
+                continue
+            if ' ' in stripped and not stripped.startswith('http'):
+                self._json(400, {'ok': False, 'error': f'Invalid line: {stripped!r}'})
+                return
+        try:
+            os.makedirs('/data', exist_ok=True)
+            with open('/data/collections.list', 'w', encoding='utf-8') as f:
+                f.write(content if content.endswith('\n') else content + '\n')
+        except Exception as e:
+            self._json(500, {'ok': False, 'error': str(e)})
+            return
+        self._json(200, {'ok': True})
+
     def do_GET(self):
         if self.path.startswith('/api/env'):
             return self._handle_api_get_env()
         if self.path.startswith('/api/ui-mqtt'):
             return self._json(200, self._read_ui_mqtt())
+        if self.path.startswith('/api/collections-list'):
+            return self._handle_api_get_collections_list()
         return super().do_GET()
 
     def do_POST(self):
@@ -163,6 +208,8 @@ class FallbackHandler(SimpleHTTPRequestHandler):
             return self._handle_api_set_env()
         if self.path.startswith('/api/restart'):
             return self._handle_api_restart()
+        if self.path.startswith('/api/collections-list'):
+            return self._handle_api_post_collections_list()
         if self.path.startswith('/api/ui-mqtt'):
             length = int(self.headers.get('Content-Length', '0') or '0')
             try:

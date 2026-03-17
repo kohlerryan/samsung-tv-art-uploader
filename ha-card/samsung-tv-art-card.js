@@ -1,5 +1,5 @@
 /**
- * Frame TV Art Card v0.2.1
+ * Frame TV Art Card v0.2.2-beta.1
  */
 
 class FrameTVArtCard extends HTMLElement {
@@ -1182,6 +1182,10 @@ class FrameTVArtCard extends HTMLElement {
           .ftv-option.selected .ftv-checkbox svg {
             opacity: 1;
           }
+          .ftv-option-all {
+            border-bottom: 1px solid rgba(255,255,255,0.12);
+            font-weight: 600;
+          }
           .ftv-clear {
             width: 40px;
             height: 40px;
@@ -1447,6 +1451,12 @@ class FrameTVArtCard extends HTMLElement {
                     <span class="ftv-trigger-arrow">▼</span>
                   </div>
                   <div class="ftv-dropdown" id="ftv-dropdown">
+                    <div class="ftv-option ftv-option-all ${sortedOptions.length > 0 && sortedOptions.every(o => this._currentSelected.includes(o)) ? 'selected' : ''}" data-value="__select_all__">
+                      <div class="ftv-checkbox">
+                        <svg viewBox="0 0 24 24"><path d="M9,20.42L2.79,14.21L5.62,11.38L9,14.77L18.88,4.88L21.71,7.71L9,20.42Z"/></svg>
+                      </div>
+                      <span>Select All</span>
+                    </div>
                     ${sortedOptions.map(opt => `
                       <div class="ftv-option ${this._currentSelected.includes(opt) ? 'selected' : ''}" data-value="${opt}">
                         <div class="ftv-checkbox">
@@ -1701,6 +1711,7 @@ class FrameTVArtCard extends HTMLElement {
         if (!this._hass) return;
         opClear.disabled = true;
         opClear.textContent = 'Clearing…';
+        if (btnRefresh) { btnRefresh.disabled = true; btnRefresh.style.opacity = '0.5'; }
         // Fire a full collections/refresh: clears override, prunes TV storage,
         // and reseeds from current collections — guaranteeing current_paths is fresh.
         this._slideshowClearRefreshPending = true;
@@ -1909,6 +1920,35 @@ class FrameTVArtCard extends HTMLElement {
       opt.addEventListener('click', (e) => {
         e.stopPropagation();
         const val = opt.dataset.value;
+        if (val === '__select_all__') {
+          const allOptEls = Array.from(this.querySelectorAll('.ftv-option:not(.ftv-option-all)'));
+          const allVals = allOptEls.map(o => o.dataset.value);
+          const allSel = allVals.length > 0 && allVals.every(v => this._currentSelected.includes(v));
+          this._currentSelected = allSel ? [] : [...allVals];
+          allOptEls.forEach(o => o.classList.toggle('selected', this._currentSelected.includes(o.dataset.value)));
+          opt.classList.toggle('selected', !allSel);
+          const triggerText = this.querySelector('.ftv-trigger-text');
+          if (triggerText) {
+            triggerText.textContent = this._currentSelected.length > 0
+              ? 'Selected: ' + this._currentSelected.join(', ')
+              : 'Select collections...';
+          }
+          const clearBtn = this.querySelector('#ftv-clear');
+          if (clearBtn) clearBtn.style.display = this._currentSelected.length > 0 ? 'flex' : 'none';
+          const applyBtn = this.querySelector('#ftv-apply');
+          const changed = !this._arraysEqual(this._currentSelected, this._baselineSelected);
+          if (applyBtn) {
+            const applyDisabled = !changed || this._currentSelected.length === 0;
+            applyBtn.style.display = changed ? 'flex' : 'none';
+            applyBtn.disabled = applyDisabled;
+            applyBtn.style.opacity = applyDisabled ? '0.5' : '';
+          }
+          if (btnRefresh && !this._refreshInProgress) {
+            btnRefresh.disabled = changed;
+            btnRefresh.style.opacity = changed ? '0.5' : '';
+          }
+          return;
+        }
         const wasSelected = this._currentSelected.includes(val);
         if (wasSelected) {
           this._currentSelected = this._currentSelected.filter(s => s !== val);
@@ -1916,6 +1956,11 @@ class FrameTVArtCard extends HTMLElement {
           this._currentSelected.push(val);
         }
         opt.classList.toggle('selected', !wasSelected);
+        // Keep "Select All" row in sync
+        const allOptEls = Array.from(this.querySelectorAll('.ftv-option:not(.ftv-option-all)'));
+        const allNowSelected = allOptEls.length > 0 && allOptEls.every(o => o.classList.contains('selected'));
+        const selectAllEl = this.querySelector('.ftv-option-all');
+        if (selectAllEl) selectAllEl.classList.toggle('selected', allNowSelected);
         // Update trigger text
         const triggerText = this.querySelector('.ftv-trigger-text');
         if (triggerText) {
@@ -1930,8 +1975,14 @@ class FrameTVArtCard extends HTMLElement {
         const applyBtn = this.querySelector('#ftv-apply');
         const changed = !this._arraysEqual(this._currentSelected, this._baselineSelected);
         if (applyBtn) {
+          const applyDisabled = !changed || this._currentSelected.length === 0;
           applyBtn.style.display = changed ? 'flex' : 'none';
-          applyBtn.disabled = !changed || !!this._isStandbyLike;
+          applyBtn.disabled = applyDisabled;
+          applyBtn.style.opacity = applyDisabled ? '0.5' : '';
+        }
+        if (btnRefresh && !this._refreshInProgress) {
+          btnRefresh.disabled = changed;
+          btnRefresh.style.opacity = changed ? '0.5' : '';
         }
       });
     });
@@ -1939,7 +1990,7 @@ class FrameTVArtCard extends HTMLElement {
     const clearBtnEl = this.querySelector('#ftv-clear');
     if (clearBtnEl) clearBtnEl.addEventListener('click', (e) => {
       e.stopPropagation();
-      if (this._isStandbyLike || this._refreshInProgress) return;
+      if (this._refreshInProgress) return;
       // Stage-only clear; apply must be clicked to publish
       this._currentSelected = [];
       const triggerText = this.querySelector('.ftv-trigger-text');
@@ -1949,8 +2000,14 @@ class FrameTVArtCard extends HTMLElement {
       const applyBtn = this.querySelector('#ftv-apply');
       if (applyBtn) {
         const changed = !this._arraysEqual(this._currentSelected, this._baselineSelected);
+        const applyDisabled = !changed || this._currentSelected.length === 0;
         applyBtn.style.display = changed ? 'flex' : 'none';
-        applyBtn.disabled = !changed || !!this._isStandbyLike;
+        applyBtn.disabled = applyDisabled;
+        applyBtn.style.opacity = applyDisabled ? '0.5' : '';
+        if (btnRefresh && !this._refreshInProgress) {
+          btnRefresh.disabled = changed;
+          btnRefresh.style.opacity = changed ? '0.5' : '';
+        }
       }
       this.querySelectorAll('.ftv-option.selected').forEach(o => o.classList.remove('selected'));
     });
@@ -1959,8 +2016,14 @@ class FrameTVArtCard extends HTMLElement {
     const applyBtn = this.querySelector('#ftv-apply');
     if (applyBtn) {
       const changed = !this._arraysEqual(this._currentSelected, this._baselineSelected);
+      const applyDisabled = !changed || this._currentSelected.length === 0;
       applyBtn.style.display = changed ? 'flex' : 'none';
-      applyBtn.disabled = !changed || !!this._isStandbyLike;
+      applyBtn.disabled = applyDisabled;
+      applyBtn.style.opacity = applyDisabled ? '0.5' : '';
+      if (btnRefresh && !this._refreshInProgress) {
+        btnRefresh.disabled = changed;
+        btnRefresh.style.opacity = changed ? '0.5' : '';
+      }
       applyBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         if (!this._hass) return;
@@ -1971,6 +2034,15 @@ class FrameTVArtCard extends HTMLElement {
         this._baselineSelected = this._currentSelected.slice();
         applyBtn.style.display = 'none';
         applyBtn.disabled = true;
+        if (btnRefresh) { btnRefresh.disabled = true; btnRefresh.style.opacity = '0.5'; }
+        // Re-enable refresh once the backend ack arrives (via _refreshInProgress clearing)
+        // or after a safety timeout
+        setTimeout(() => {
+          if (btnRefresh && !this._refreshInProgress && !this._isStandbyLike) {
+            btnRefresh.disabled = false;
+            btnRefresh.style.opacity = '';
+          }
+        }, 10000);
       });
     }
     } // end if (trigger && dropdown)
@@ -2094,7 +2166,7 @@ class FrameTVArtCard extends HTMLElement {
     }
   }
 
-console.info('%c FRAME-TV-ART-CARD %c v0.2.1 ', 'color: white; background: #03a9f4; font-weight: bold;', '');
+console.info('%c FRAME-TV-ART-CARD %c v0.2.2-beta.1 ', 'color: white; background: #03a9f4; font-weight: bold;', '');
 
 // Register custom element so Lovelace can use <frame-tv-art-card>
 try {

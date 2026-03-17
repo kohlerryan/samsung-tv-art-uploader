@@ -1,0 +1,52 @@
+# ==============================
+# Radxa First Boot Configuration
+# ==============================
+#
+# This file uses the Radxa first-boot DSL — it is NOT a bash script.
+# Keep this file as-is. The samsung-tv-art Docker setup is done separately
+# by running setup.sh after SSH-ing in (see examples/headless/setup.sh).
+#
+# ⚠ update_generic_hostname: adjust the values to match your board.
+#   For Radxa Zero 3E the correct value is likely "radxa-zero3" —
+#   check the default before.txt on your flashed image to confirm.
+
+# Allow config to continue even when some commands fail
+no_fail
+log "Running before.txt as first boot configuration"
+
+# Update generic hostname — adjust for your board model
+update_generic_hostname radxa-zero3
+
+# Create default accounts
+add_user radxa radxa
+user_append_group radxa sudo
+user_append_group radxa audio
+user_append_group radxa video
+user_append_group radxa plugdev
+user_append_group radxa render
+user_append_group radxa gpio
+user_append_group radxa i2c
+user_append_group radxa spidev
+user_append_group radxa pwm
+
+# Resize root partition at the filesystem level
+resize_root
+
+# Disable services
+disable_service ssh
+disable_service ssh.socket
+disable_service smbd
+disable_service nmbd
+disable_service systemd-networkd
+
+# Generate unique hardware fingerprint
+regenerate_ssh_hostkey
+
+# Configure locale
+update_locale en_US.UTF-8
+
+# Enable SSH on headless first boot (required for remote access)
+if headless enable_service ssh
+
+# Remove first-boot package
+remove_packages rsetup-config-first-boot

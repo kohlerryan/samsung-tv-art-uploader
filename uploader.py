@@ -563,8 +563,17 @@ class monitor_and_display:
                 # TV just left art mode — publish sentinel with in_art_mode: False so UIs disable
                 self._publish_mqtt_state('Unavailable', 'unavailable', None)
             elif prev is False and in_artmode:
-                # TV just re-entered art mode — immediately republish so UIs re-enable
+                # TV just re-entered art mode — immediately republish so UIs re-enable.
+                # Set _last_state_publish=0 AND do an immediate forced publish so the
+                # in_art_mode: True state is pushed to MQTT now, even if a reseed starts
+                # right after (which would set _refresh_in_progress=True and block the
+                # next periodic publish for the entire reseed duration).
                 self._last_state_publish = 0
+                if not self._refresh_in_progress:
+                    try:
+                        await self._publish_current_artwork_state(force=True)
+                    except Exception:
+                        pass
             return in_artmode
         except AssertionError:
             self.consecutive_failures += 1
@@ -835,13 +844,16 @@ class monitor_and_display:
         else:
             self.log.warning('syncing disabled, not updating uploaded files list')
         
-        # Force immediate art display after initialization if we have content
-        # This ensures we don't sit on standby for 30 mins after restart
+        # Display art immediately after init only if TV is already in art mode.
+        # If not, the main loop will pick it up when art mode is detected naturally.
         if len(self.get_content_ids()) > 0:
-            self.log.info('Content available after init, displaying first artwork immediately')
-            await self.change_art()
-            self.start = time.time()
-            self.write_program_data()
+            if await self.safe_in_artmode():
+                self.log.info('Content available after init and TV is in art mode, displaying first artwork')
+                await self.change_art()
+                self.start = time.time()
+                self.write_program_data()
+            else:
+                self.log.info('Content available after init but TV is not in art mode; waiting for art mode')
         # Initialization complete — clear startup lock and let UI know it's safe
         self._startup_in_progress = False
         self._publish_slideshow_state()
@@ -928,27 +940,64 @@ class monitor_and_display:
     def read_file(self, filename):
         '''
         read image file, return file binary data and file type
-        Resizes images larger than 4K to 4K to ensure compatibility with Samsung Frame TV
+        Resizes images larger than 4K to 4K to ensure compatibility with Samsung Frame TV.
+        Also compresses images that exceed the Samsung TV art upload limit (~2 MB).
         '''
+        # Older Frame TVs (e.g. 2019) reject uploads over ~1 MB with error -1.
+        # Set SAMSUNG_TV_ART_MAX_FILE_BYTES to enable compression (e.g. 900000 for 2019 models).
+        # Unset by default — no size-based recompression on modern TVs.
+        _max_bytes_env = os.environ.get('SAMSUNG_TV_ART_MAX_FILE_BYTES', '').strip()
+        MAX_UPLOAD_BYTES = int(_max_bytes_env) if _max_bytes_env else None
         try:
             with open(filename, 'rb') as f:
                 file_data = f.read()
             file_type = self.get_file_type(filename)
             
-            # Resize if necessary
             if HAVE_PIL and file_data:
                 try:
                     img = Image.open(io.BytesIO(file_data))
+                    # Ensure we have a mutable copy for any reprocessing below
+                    img_fmt = img.format or 'JPEG'
+                    needs_save = False
+
+                    # Step 1: Resize to fit 4K if dimensions exceed it
                     if img.width > 3840 or img.height > 2160:
                         self.log.info('Resizing image {} from {}x{} to fit 4K'.format(filename, img.width, img.height))
                         img.thumbnail((3840, 2160), Image.Resampling.LANCZOS)
+                        needs_save = True
+
+                    # Step 2: Re-encode to get accurate byte count after any resize,
+                    # then progressively reduce JPEG quality until under the size limit.
+                    if needs_save or (MAX_UPLOAD_BYTES and len(file_data) > MAX_UPLOAD_BYTES):
+                        # Convert palette/RGBA to RGB for JPEG compatibility
+                        if img.mode not in ('RGB', 'L'):
+                            img = img.convert('RGB')
                         output = io.BytesIO()
-                        img.save(output, format=img.format or 'JPEG')
+                        quality = 92
+                        img.save(output, format='JPEG', quality=quality)
                         file_data = output.getvalue()
-                        # Update file_type if changed
-                        file_type = self.get_file_type(filename, img)
+                        file_type = 'jpg'
+
+                        # Reduce quality in steps until the file fits
+                        while MAX_UPLOAD_BYTES and len(file_data) > MAX_UPLOAD_BYTES and quality > 50:
+                            quality -= 8
+                            output = io.BytesIO()
+                            img.save(output, format='JPEG', quality=max(quality, 50))
+                            file_data = output.getvalue()
+
+                        if MAX_UPLOAD_BYTES and len(file_data) > MAX_UPLOAD_BYTES:
+                            self.log.warning(
+                                'Image %s is still %d bytes after quality=%d compression; '
+                                'TV may reject it (limit ~%d bytes)',
+                                filename, len(file_data), quality, MAX_UPLOAD_BYTES
+                            )
+                        elif needs_save or quality < 92:
+                            self.log.info(
+                                'Image %s reprocessed to %d bytes (quality=%d)',
+                                filename, len(file_data), quality
+                            )
                 except Exception as e:
-                    self.log.warning('Failed to resize image {}: {}'.format(filename, e))
+                    self.log.warning('Failed to process image {}: {}'.format(filename, e))
             
             return file_data, file_type
         except Exception as e:
@@ -1177,6 +1226,10 @@ class monitor_and_display:
         Returns list of paths relative to media_root.
         '''
         last_paths = getattr(self, '_last_slideshow_paths', set())
+        # Shuffle so remainder-based extra slots are distributed randomly each run,
+        # not always biased toward the alphabetically-first collections.
+        collections = list(collections)
+        random.shuffle(collections)
         num_collections = len(collections)
         per_collection = max_uploads // num_collections
         remainder = max_uploads % num_collections
@@ -1843,17 +1896,20 @@ class monitor_and_display:
         except Exception as e:
             self.log.warning('MQTT slideshow state publish failed: %s', e)
 
-    def _publish_slideshow_available(self):
-        """Scan selected collections on disk and publish full image list to MQTT."""
+    def _publish_slideshow_available(self, override_collections=None):
+        """Scan selected collections on disk and publish full image list to MQTT.
+        Pass override_collections to preview a candidate set without committing it.
+        """
         if not self.mqtt_enabled or not self._mqtt:
             return
         try:
             # Build a set of path_rel values currently uploaded to the TV
             uploaded_paths = {v.get('path_rel', k) for k, v in self.uploaded_files.items()}
-            selected_set = set(self.selected_collections or [])
+            effective_collections = override_collections if override_collections is not None else (self.selected_collections or [])
+            selected_set = set(effective_collections)
 
             images = []
-            for collection in list(selected_set):
+            for collection in list(effective_collections):
                 coll_path = os.path.join(self.media_root, collection)
                 if not os.path.isdir(coll_path):
                     continue
@@ -1901,9 +1957,23 @@ class monitor_and_display:
         except Exception as e:
             self.log.warning('MQTT slideshow available publish failed: %s', e)
 
-    async def _apply_slideshow_override(self, paths, req_id=None):
-        """Upload any missing override files, activate the override, and trigger change_art."""
+    async def _apply_slideshow_override(self, paths, req_id=None, new_collections=None):
+        """Upload any missing override files, activate the override, and trigger change_art.
+        When new_collections is provided, commits that collection selection atomically
+        (no separate reseed will be triggered).
+        """
         try:
+            if new_collections is not None:
+                # Commit the collection selection without triggering a separate full reseed.
+                # Also sync self.folder so apply_selection() sees no pending change.
+                self.selected_collections = new_collections
+                self._pending_selection_change = False
+                desired = self.get_selected_folder()
+                if os.path.isdir(desired):
+                    self.folder = desired
+                self._publish_selected_collections_state()
+                self._cache_selected_collections()
+                self.log.info('Collections committed atomically with override: %s', new_collections)
             uploaded_paths = {v.get('path_rel', k) for k, v in self.uploaded_files.items()}
             to_upload = [p for p in paths if p not in uploaded_paths]
             if to_upload:
@@ -2142,6 +2212,11 @@ class monitor_and_display:
                 self._pending_selection_change = True
                 self._publish_selected_collections_state()
                 self._cache_selected_collections()
+                # Note: do NOT publish slideshow/available here — the reseed triggered by
+                # _pending_selection_change will call _publish_slideshow_available() when
+                # it completes. Publishing it now would arrive before uploading=true,
+                # causing the UI to prematurely clear slideshowUserRefreshPending and
+                # seed the grid from stale current_paths before the new artwork is ready.
                 self._publish_ack('collections/set', 'ok', 'Collections set', req_id)
                 return
             if cmd == 'collections/add':
@@ -2332,7 +2407,12 @@ class monitor_and_display:
                 if not paths:
                     self._publish_ack('slideshow/override/set', 'error', 'No paths provided', req_id)
                     return
-                fut = self._schedule_command_coro(self._apply_slideshow_override(paths, req_id), 'slideshow/override/set')
+                # Optional 'collections' field: commit collection changes atomically with override.
+                new_cols = None
+                if data and 'collections' in data and isinstance(data['collections'], list):
+                    raw_cols = [str(c).strip() for c in data['collections'] if str(c).strip()]
+                    new_cols = [self._map_to_artwork_dir(c) or c for c in raw_cols if (self._map_to_artwork_dir(c) or c)]
+                fut = self._schedule_command_coro(self._apply_slideshow_override(paths, req_id, new_collections=new_cols), 'slideshow/override/set')
                 if not fut:
                     self._publish_ack('slideshow/override/set', 'error', 'Failed to queue override apply', req_id)
                 return
@@ -2344,7 +2424,13 @@ class monitor_and_display:
                 self._publish_ack('slideshow/override/clear', 'ok', 'Slideshow override cleared; auto mode restored', req_id)
                 return
             if cmd == 'slideshow/available/request':
-                self._publish_slideshow_available()
+                # Optional 'collections' field allows the UI to preview a staged
+                # collection set in the grid without committing selected_collections.
+                preview_cols = None
+                if data and 'collections' in data and isinstance(data['collections'], list):
+                    raw_cols = [str(c).strip() for c in data['collections'] if str(c).strip()]
+                    preview_cols = [self._map_to_artwork_dir(c) or c for c in raw_cols]
+                self._publish_slideshow_available(override_collections=preview_cols)
                 self._publish_ack('slideshow/available/request', 'ok', 'Available list published', req_id)
                 return
             # Unknown command
