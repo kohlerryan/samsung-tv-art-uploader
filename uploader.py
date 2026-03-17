@@ -476,8 +476,8 @@ class monitor_and_display:
 
         async def _on_go_to_standby(event, response):
             self.log.debug('TV WebSocket event: go_to_standby')
-            self._in_art_mode = False
-            self.last_artmode_check = time.time()
+            # Don't update _in_art_mode here — let safe_in_artmode() own all state
+            # transitions so MQTT publishing logic fires correctly.
             _signal_artmode_change()
 
         async def _on_art_mode_changed(event, response):
@@ -487,14 +487,11 @@ class monitor_and_display:
             except Exception:
                 new_state = None
             self.log.debug('TV WebSocket event: art_mode_changed (status=%s)', new_state)
-            if new_state is not None:
-                self._in_art_mode = new_state
-                self.last_artmode_check = time.time()
+            # Don't write _in_art_mode directly — just wake the loop.
             _signal_artmode_change()
 
         async def _on_wakeup(event, response):
             self.log.debug('TV WebSocket event: wakeup')
-            # Don't set _in_art_mode here — let the poll confirm; just wake the loop
             _signal_artmode_change()
 
         try:
