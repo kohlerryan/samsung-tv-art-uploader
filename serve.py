@@ -206,7 +206,24 @@ class FallbackHandler(SimpleHTTPRequestHandler):
             return self._json(200, self._read_ui_mqtt())
         if self.path.startswith('/api/collections-list'):
             return self._handle_api_get_collections_list()
+        if self.path in ('/favicon.png', '/favicon.ico'):
+            return self._serve_favicon()
         return super().do_GET()
+
+    def _serve_favicon(self):
+        favicon_path = '/app/www/favicon.png'
+        try:
+            with open(favicon_path, 'rb') as f:
+                data = f.read()
+            self.send_response(200)
+            self.send_header('Content-Type', 'image/png')
+            self.send_header('Content-Length', str(len(data)))
+            self.send_header('Cache-Control', 'public, max-age=86400')
+            self.end_headers()
+            self.wfile.write(data)
+        except FileNotFoundError:
+            self.send_response(404)
+            self.end_headers()
 
     def do_POST(self):
         if self.path.startswith('/api/env'):

@@ -12,7 +12,7 @@ Built on top of [NickWaterton/samsung-tv-ws-api](https://github.com/NickWaterton
 
 > **Upgrading from v0.1.x?** See the [v0.2.0 release notes](https://github.com/kohlerryan/samsung-tv-art-uploader/releases/tag/v0.2.0) for breaking changes and what's new.
 
-> **Upgrading from v0.2.x?** See the [v0.2.3-beta.2 release notes](https://github.com/kohlerryan/samsung-tv-art-uploader/releases/tag/v0.2.3-beta.2) for what's new.
+> **Upgrading from v0.2.x?** See the [v0.2.3-beta.3 release notes](https://github.com/kohlerryan/samsung-tv-art-uploader/releases/tag/v0.2.3-beta.3) for what's new.
 
 ## Features
 
@@ -269,8 +269,8 @@ Key variables:
 | `SAMSUNG_TV_ART_LOCAL_WEB` | `true` | Enable the web UI on port 8080 |
 | `SAMSUNG_TV_ART_MDNS_ENABLE` | `true` | Advertise via mDNS as `<hostname>.local` — requires host, macvlan, or macvlan+bridge networking |
 | `SAMSUNG_TV_ART_MODE_CHECK_SECONDS` | `5` | How often (in seconds) the uploader polls the TV as a fallback to confirm Art Mode state. Art Mode changes are now detected instantly via WebSocket events (`go_to_standby`, `art_mode_changed`, `wakeup`), so the poll interval no longer affects response time. The default of `5` is fine; you can raise it safely if you want less TV chatter. |
-| `SAMSUNG_TV_ART_MAX_FILE_BYTES` | _(unset)_ | **2019 Frame TV and older models only.** These TVs reject uploads over ~750–800 KB with error `-1`. Set this to the maximum encoded image size in bytes; the uploader will progressively JPEG-compress any image that exceeds it. If quality reduction alone can't shrink the file enough, the image is also scaled down to half resolution and compression retried. Recommended: `800000`. Leave unset on modern TVs — no recompression is applied by default. |
-| `SAMSUNG_TV_ART_MAX_DIMENSION` | _(unset)_ | **2019 / 1080p Frame TV only.** Caps the maximum image resolution before upload, e.g. `1920x1080`. Accepts `WxH` or a single number for a square cap. Useful when the TV rejects images purely because of their pixel size even if the file size is within the byte limit. |
+| `SAMSUNG_TV_ART_MAX_FILE_BYTES` | _(unset)_ | Maximum encoded image size in bytes. When set, the uploader will progressively JPEG-compress any image that exceeds it. If quality reduction alone can't shrink the file enough, the image is also scaled to half resolution and compression retried. Useful for TVs or network configurations that reject large uploads. Leave unset on modern TVs — no recompression is applied by default. |
+| `SAMSUNG_TV_ART_MAX_DIMENSION` | _(unset)_ | Caps the maximum image resolution before upload, e.g. `1920x1080`. Accepts `WxH` or a single number for a square cap. Useful for 1080p Frame TVs that reject oversized images regardless of file size. |
 
 See `examples/samsung-tv-art.env.example` for the full list with descriptions.
 
@@ -391,6 +391,8 @@ samsung-tv-art/
 ```
 
 ## Troubleshooting
+
+**Uploads fail on 2018/2019 Frame TV (`send_image` error -1)** — These TVs run Art API `0.97` and require images to be uploaded as a WebSocket binary frame rather than via the D2D socket method used by newer firmware. The uploader detects this automatically: when `api_version` returns `0.97` it switches to the correct protocol. Check the logs for `API version: 0.97` to confirm it was detected. If the TV is still failing, confirm it is in Art Mode and that the token file in `data/` is valid. See [xchwarze/samsung-tv-ws-api#130](https://github.com/xchwarze/samsung-tv-ws-api/issues/130) for full background.
 
 **TV not connecting** — Check `SAMSUNG_TV_ART_TV_IP` and ensure the container is on the same network as the TV. The TV may prompt for a pairing confirmation on first connect.
 

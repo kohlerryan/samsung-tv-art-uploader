@@ -1,5 +1,5 @@
 /**
- * Frame TV Art Card v0.2.2-beta.2
+ * Frame TV Art Card v0.2.2-beta.3
  */
 
 class FrameTVArtCard extends HTMLElement {
@@ -8,6 +8,8 @@ class FrameTVArtCard extends HTMLElement {
     this._config = {};
     this._hass = null;
     this._dropdownOpen = false;
+    this._applyPending = false;
+    this._applyPendingTimer = null;
     this._lastStateHash = '';
     this._statusMessage = '';
     this._refreshAck = { status: '', message: '', req_id: '', updated: 0 };
@@ -129,11 +131,20 @@ class FrameTVArtCard extends HTMLElement {
     this._hass = hass;
     this._ensureRefreshSubscriptions();
     
-    // Sync baseline from HA state; keep staged when dropdown is open
-    const fromState = this._getSelectedCollections();
-    this._baselineSelected = Array.isArray(fromState) ? [...fromState] : [];
-    if (!Array.isArray(this._currentSelected) || !this._dropdownOpen) {
-      this._currentSelected = [...this._baselineSelected];
+    // Sync baseline from HA state; keep staged when dropdown is open or apply is in flight.
+    // Only update when the dropdown is closed AND no apply is pending (or HA has confirmed the applied value).
+    if (!this._dropdownOpen) {
+      const fromState = this._getSelectedCollections();
+      if (!this._applyPending || this._arraysEqual(fromState, this._currentSelected)) {
+        if (this._applyPending) {
+          this._applyPending = false;
+          if (this._applyPendingTimer) { clearTimeout(this._applyPendingTimer); this._applyPendingTimer = null; }
+        }
+        this._baselineSelected = Array.isArray(fromState) ? [...fromState] : [];
+        if (!Array.isArray(this._currentSelected)) {
+          this._currentSelected = [...this._baselineSelected];
+        }
+      }
     }
     
     // Don't re-render if dropdown is open
@@ -981,8 +992,8 @@ class FrameTVArtCard extends HTMLElement {
     const mqttConnected = !!(this._hass && this._config.settings_entity && this._hass.states[this._config.settings_entity] && this._hass.states[this._config.settings_entity].state !== 'unavailable');
     this._isFixed = isCompressed;
 
-    // Initialize staged selection to baseline on render
-    this._currentSelected = Array.isArray(this._currentSelected) && this._dropdownOpen
+    // Initialize staged selection to baseline on render; keep staged if dropdown is open or apply is pending
+    this._currentSelected = Array.isArray(this._currentSelected) && (this._dropdownOpen || this._applyPending)
       ? this._currentSelected
       : [...selectedCollections];
 
@@ -1536,13 +1547,16 @@ class FrameTVArtCard extends HTMLElement {
           <div class="ftv-settings" id="ftv-settings">
             <div class="ftv-panel-header">Settings</div>
             <div class="ftv-field">
-              <div class="ftv-label">Frame TV IP address</div>
+              <div class="ftv-label" style="display:flex; align-items:center; gap:6px;">
+                <span>Frame TV IP address</span>
+                <span style="font-weight:400; font-size:0.85em; color:${inArtMode ? '#6abf69' : '#e5c07b'};">${inArtMode ? '● Art mode' : '● Not in art mode'}</span>
+              </div>
               <input class="ftv-input" id="ftv-tv-ip" type="text" placeholder="e.g. 10.83.21.57" />
             </div>
             <div class="ftv-field">
-              <div class="ftv-label" style="display:flex; justify-content:space-between; align-items:center;">
+              <div class="ftv-label" style="display:flex; align-items:center; gap:6px;">
                 <span>MQTT broker host</span>
-                <span style="font-weight:400; color:${mqttConnected ? '#6abf69' : '#e5c07b'};">${mqttConnected ? '● Connected' : '● Unavailable'}</span>
+                <span style="font-weight:400; font-size:0.85em; color:${mqttConnected ? '#6abf69' : '#e5c07b'};">${mqttConnected ? '● Connected' : '● Unavailable'}</span>
               </div>
               <input class="ftv-input" id="ftv-mqtt-host" type="text" placeholder="e.g. 10.0.0.5" />
             </div>
@@ -2103,8 +2117,15 @@ class FrameTVArtCard extends HTMLElement {
         const topic = 'frame_tv/cmd/collections/set';
         const payload = { collections: this._currentSelected.slice(), req_id: Date.now() };
         this._hass.callService('mqtt', 'publish', { topic, payload: JSON.stringify(payload) });
-        // Optimistically align baseline to staged
+        // Optimistically align baseline to staged and block HA state from resetting it
+        // until HA confirms the new selection (or the 10s safety timeout fires).
         this._baselineSelected = this._currentSelected.slice();
+        this._applyPending = true;
+        if (this._applyPendingTimer) clearTimeout(this._applyPendingTimer);
+        this._applyPendingTimer = setTimeout(() => {
+          this._applyPending = false;
+          this._applyPendingTimer = null;
+        }, 10000);
         applyBtn.style.display = 'none';
         applyBtn.disabled = true;
         if (btnRefresh) { btnRefresh.disabled = true; btnRefresh.style.opacity = '0.5'; }
@@ -2239,7 +2260,7 @@ class FrameTVArtCard extends HTMLElement {
     }
   }
 
-console.info('%c FRAME-TV-ART-CARD %c v0.2.2-beta.2 ', 'color: white; background: #03a9f4; font-weight: bold;', '');
+console.info('%c FRAME-TV-ART-CARD %c v0.2.2-beta.3 ', 'color: white; background: #03a9f4; font-weight: bold;', '');
 
 // Register custom element so Lovelace can use <frame-tv-art-card>
 try {

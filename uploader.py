@@ -91,12 +91,14 @@ except Exception:
 logging.basicConfig(level=logging.INFO)
 
 
+
 class MQTTLogHandler(logging.Handler):
     """Logging handler that forwards records to frame_tv/log (non-retained, QoS 0)."""
     TOPIC = 'frame_tv/log'
 
     def __init__(self, mqtt_client):
         super().__init__(level=logging.INFO)
+        self.setFormatter(logging.Formatter('%(levelname)s:%(message)s'))
         self._mqtt = mqtt_client
         self._publishing = False  # re-entrancy guard
 
@@ -293,7 +295,7 @@ class monitor_and_display:
         self.selection_mqtt_topic = os.environ.get('SAMSUNG_TV_ART_SELECTION_MQTT_TOPIC', 'frame_tv/selected_collections/state')
         self._pending_selection_change = False
         self.selection_only = os.environ.get('SAMSUNG_TV_ART_SELECTION_ONLY', '').lower() in ['1', 'true', 'yes']
-        self.artmode_refresh_seconds = int(os.environ.get('SAMSUNG_TV_ART_MODE_CHECK_SECONDS', '5'))
+        self.artmode_refresh_seconds = int(os.environ.get('SAMSUNG_TV_ART_MODE_CHECK_SECONDS', '1'))
         self.last_artmode_check = 0
         self.consecutive_failures = 0
         self.max_backoff_seconds = 15  # Max 15 seconds between art mode re-checks
@@ -324,6 +326,9 @@ class monitor_and_display:
         self.uploaded_files = {}
         self.fav = set()
         self.api_version = 0
+        self.api_version_str = None        # Raw string from get_api_version(), e.g. '0.97' or '4.3.4.0'
+        self.api_version_failed = False    # True when api_version request itself errors (e.g. error -9)
+        self._upload_compat_warned = False  # Emit old-API diagnostic at most once
         self.start = time.time()
         self.current_content_id = None
         self.shown_content_ids = set()  # Track shown images for shuffle-without-repeat
@@ -402,6 +407,7 @@ class monitor_and_display:
         self._loop = None
         self._collections_sync_running = False
         self._artmode_event = None         # asyncio.Event set when TV signals an art mode change
+        self._not_in_artmode_logged = False    # suppress repeated 'not in art mode' messages
         try:
             #doesn't work in Windows
             asyncio.get_running_loop().add_signal_handler(SIGINT, self.close)
@@ -535,8 +541,10 @@ class monitor_and_display:
         else:
             self.log.info('Start Monitoring')
             try:
-                await self.tv.start_listening()
+                await asyncio.wait_for(self.tv.start_listening(), timeout=15)
                 self.log.info('Started')
+            except asyncio.TimeoutError:
+                self.log.warning('TV connection timed out at startup — will retry in main loop')
             except Exception as e:
                 self.log.error('failed to connect with TV: {}'.format(e))
             if self.tv.is_alive():
@@ -544,24 +552,23 @@ class monitor_and_display:
                     await self.check_matte()
                     await self.ensure_standby_selected()
                     await self.cleanup_old_uploads()
-                    # Publish MQTT discovery early so entity exists at startup
-                    if self.mqtt_enabled:
-                        self._publish_mqtt_discovery()
-                        # Also publish collections + settings on startup
-                        self._publish_collections_discovery()
-                        self._publish_settings_discovery()
-                        await asyncio.sleep(0)  # yield before heavy scan
-                        self._publish_collections_state()
-                        self._publish_settings_state()
-                        self._startup_in_progress = True  # lock UI until initialize() completes
-                        self._publish_slideshow_state()
-                        self._publish_slideshow_available()
-                        # Do not restore from cache on startup; retained MQTT selection will drive state
-                        pass
-                    await self.select_artwork()
-                finally:
-                    await self.tv.close()
-            else:
+                except Exception as e:
+                    self.log.warning('Startup TV setup error (non-fatal): %s', e)
+            # Always run select_artwork — even if TV is not reachable right now,
+            # the main loop will wait for art mode in the meantime.
+            try:
+                if self.mqtt_enabled:
+                    self._publish_mqtt_discovery()
+                    self._publish_collections_discovery()
+                    self._publish_settings_discovery()
+                    await asyncio.sleep(0)
+                    self._publish_collections_state()
+                    self._publish_settings_state()
+                    self._startup_in_progress = True
+                    self._publish_slideshow_state()
+                    self._publish_slideshow_available()
+                await self.select_artwork()
+            finally:
                 await self.tv.close()
 
     async def _wait_for_csv_metadata(self):
@@ -635,7 +642,8 @@ class monitor_and_display:
             return in_artmode
         except AssertionError:
             self.consecutive_failures += 1
-            self.log.warning('TV artmode check failed (empty response, failure %d); treating as off', self.consecutive_failures)
+            log_fn = self.log.warning if self.consecutive_failures == 1 else self.log.debug
+            log_fn('TV artmode check failed (empty response, failure %d); treating as off', self.consecutive_failures)
             prev = self._in_art_mode
             self._in_art_mode = False
             if prev is True:
@@ -643,7 +651,8 @@ class monitor_and_display:
             return False
         except Exception as e:
             self.consecutive_failures += 1
-            self.log.warning('TV artmode check failed (failure %d): %s', self.consecutive_failures, e)
+            log_fn = self.log.warning if self.consecutive_failures == 1 else self.log.debug
+            log_fn('TV artmode check failed (failure %d): %s', self.consecutive_failures, e)
             prev = self._in_art_mode
             self._in_art_mode = False
             if prev is True:
@@ -653,9 +662,9 @@ class monitor_and_display:
     def get_backoff_delay(self):
         """Calculate exponential backoff delay based on consecutive failures."""
         if self.consecutive_failures <= 1:
-            return self.artmode_refresh_seconds or 5
-        # Exponential backoff: 5, 10, 15 (capped at max_backoff_seconds)
-        delay = min(5 * (2 ** (self.consecutive_failures - 1)), self.max_backoff_seconds)
+            return self.artmode_refresh_seconds or 1
+        # Exponential backoff: 1, 2, 4... (capped at max_backoff_seconds)
+        delay = min(1 * (2 ** (self.consecutive_failures - 1)), self.max_backoff_seconds)
         return delay
 
     async def cleanup_old_uploads(self):
@@ -665,10 +674,16 @@ class monitor_and_display:
                 self.log.info('TV not in art mode, skipping cleanup')
                 return
 
+            # Protect the currently-displayed image from deletion even if standby
+            # selection hasn't taken effect yet (e.g. slow TV or stale content_id).
+            currently_displayed = await self.get_current_artwork()
+
             my_photos = await self.get_tv_content('MY-C0002')
             if my_photos:
-                if self.standby_content_id:
-                    my_photos = [cid for cid in my_photos if cid != self.standby_content_id]
+                skip = {cid for cid in (self.standby_content_id, currently_displayed) if cid}
+                my_photos = [cid for cid in my_photos if cid not in skip]
+                if currently_displayed and currently_displayed != self.standby_content_id:
+                    self.log.info('Protecting currently-displayed image from deletion: %s', currently_displayed)
                 if my_photos:
                     self.log.info('Cleaning up %d existing uploads from TV...', len(my_photos))
                     # Let TV settle before starting deletions
@@ -709,7 +724,7 @@ class monitor_and_display:
         try:
             file_data, file_type = self.read_file(standby_path)
             if file_data and self.tv.art_mode:
-                content_id = await self.tv.upload(file_data, file_type=file_type, matte=self.matte, portrait_matte=self.matte)
+                content_id = await self._upload_to_tv(file_data, file_type, self.matte)
                 if content_id:
                     self.standby_content_id = content_id
                     await self.tv.select_image(content_id)
@@ -719,6 +734,7 @@ class monitor_and_display:
                         self._publish_mqtt_state('Standby', 'standby.png', os.path.basename(os.path.dirname(standby_path)) or None)
                     self.log.info('Selected standby: %s (%s)', self.standby, content_id)
         except Exception as e:
+            self._warn_upload_compat(e)
             self.log.warning('Failed to upload/select standby: %s', e)
 
     def get_selected_folder(self):
@@ -821,11 +837,77 @@ class monitor_and_display:
         try:
             api_version = await self.tv.get_api_version()
             self.log.info('API version: {}'.format(api_version))
+            self.api_version_str = api_version
             self.api_version = 0 if int(api_version.replace('.','')) < 4000 else 1
         except Exception as e:
             self.log.warning('Failed to get API version: %s', e)
             self.api_version = 0
+            self.api_version_failed = True
         
+    async def _upload_ws_binary(self, file_data, file_type, matte):
+        '''Upload image via WebSocket binary frame — required for Art API 0.97 (2018/2019 Frame TVs).
+
+        SmartThings protocol confirmed by Wireshark (see https://github.com/xchwarze/samsung-tv-ws-api/issues/130):
+          payload = uint16_be(len(header_json)) + header_json_bytes + image_bytes
+        where header_json wraps the send_image request in a ms.channel.emit binary frame.
+        The TV responds with an image_added d2d_service_message containing content_id.
+        '''
+        upload_id = str(uuid.uuid4())
+        ft = file_type.lower()
+        ft_hdr = 'JPEG' if ft in ('jpg', 'jpeg') else ft.upper()
+
+        inner = json.dumps({
+            'request': 'send_image',
+            'file_type': ft_hdr,
+            'matte_id': matte or 'none',
+            'id': upload_id,
+        }, separators=(',', ':'))
+        outer = json.dumps({
+            'method': 'ms.channel.emit',
+            'params': {
+                'data': inner,
+                'to': 'host',
+                'event': 'art_app_request',
+            },
+        }, separators=(',', ':')).encode('utf-8')
+        payload = len(outer).to_bytes(2, 'big') + outer + file_data
+
+        # Register response future BEFORE sending to avoid a race with fast TVs
+        self.tv.pending_requests[upload_id] = asyncio.Future()
+        await self.tv.start_listening()
+        assert self.tv.connection, 'TV WebSocket connection not available'
+        await self.tv.connection.send(payload)   # bytes → WebSocket binary frame
+        data = await self.tv.wait_for_response(upload_id, timeout=30)
+        return data.get('content_id') if data else None
+
+    async def _upload_to_tv(self, file_data, file_type, matte):
+        '''Route upload to the correct method based on Art API version.
+
+        Art API 0.97 (2018/2019 firmware): WS-binary frame upload.
+        All other versions: D2D socket upload via the samsungtvws library.
+        '''
+        if self.api_version_str == '0.97':
+            return await self._upload_ws_binary(file_data, file_type, matte)
+        return await self.tv.upload(file_data, file_type=file_type, matte=matte, portrait_matte=matte)
+
+    def _warn_upload_compat(self, error):
+        '''Emit a one-time diagnostic when uploads fail with error -1 on a TV with unknown old API.'''
+        if self._upload_compat_warned:
+            return
+        if 'error number -1' not in str(error):
+            return
+        # Only fire when api_version itself failed (truly unknown protocol).
+        # Art API 0.97 is handled by _upload_ws_binary, so errors there indicate
+        # a different problem and don't need this generic hint.
+        if self.api_version_failed:
+            self._upload_compat_warned = True
+            self.log.warning(
+                'Upload failed with error -1 on a TV whose api_version could not be determined. '
+                'If this is a 2018/2019 Frame TV, the WS-binary upload path may not have been '
+                'selected — check that api_version returns "0.97" in the logs. '
+                'See https://github.com/xchwarze/samsung-tv-ws-api/issues/130 for background.'
+            )
+
     async def check_matte(self):
         '''
         checks if the matte passed for uploads to use is valid type and color
@@ -1001,9 +1083,10 @@ class monitor_and_display:
         Resizes images larger than 4K to 4K to ensure compatibility with Samsung Frame TV.
         Also compresses images that exceed the Samsung TV art upload limit (~2 MB).
         '''
-        # Older Frame TVs (e.g. 2019) reject uploads over ~1 MB with error -1.
-        # Set SAMSUNG_TV_ART_MAX_FILE_BYTES to enable compression (e.g. 800000 for 2019 models;
-        # the actual 2019 limit is typically ~750-800 KB, not 900 KB).
+        # Art API 0.97 (2018/2019 Frame TVs) use a WS-binary upload path handled by _upload_ws_binary().
+        # For all other TVs the standard D2D socket upload from the samsungtvws library is used.
+        # File-size-based recompression via SAMSUNG_TV_ART_MAX_FILE_BYTES is unrelated to the
+        # protocol version and can be used independently on any TV model.
         # Unset by default — no size-based recompression on modern TVs.
         _max_bytes_env = os.environ.get('SAMSUNG_TV_ART_MAX_FILE_BYTES', '').strip()
         MAX_UPLOAD_BYTES = int(_max_bytes_env) if _max_bytes_env else None
@@ -1206,12 +1289,13 @@ class monitor_and_display:
                         pass
                 content_id = None
                 try:
-                    content_id = await self.tv.upload(file_data, file_type=file_type, matte=self.matte, portrait_matte=self.matte)
+                    content_id = await self._upload_to_tv(file_data, file_type, self.matte)
                     consecutive_failures = 0  # Reset on success
                 except AssertionError:
                     self.log.warning('file: %s failed to upload (empty response)', display_name)
                     consecutive_failures += 1
                 except Exception as e:
+                    self._warn_upload_compat(e)
                     self.log.warning('file: %s failed to upload: %s', display_name, e)
                     consecutive_failures += 1
                 
@@ -1683,8 +1767,10 @@ class monitor_and_display:
             # Command handling
             if topic.startswith(f"{self.mqtt_cmd_prefix}/"):
                 payload_raw = msg.payload.decode('utf-8') if isinstance(msg.payload, (bytes, bytearray)) else (msg.payload or '')
-                self.log.info('Received MQTT command on %s: %s', topic, payload_raw if isinstance(payload_raw, str) else '<binary>')
-                self._handle_mqtt_command(topic[len(self.mqtt_cmd_prefix)+1:], payload_raw)
+                cmd = topic[len(self.mqtt_cmd_prefix)+1:]
+                log_fn = self.log.debug if cmd == 'slideshow/available/request' else self.log.info
+                log_fn('Received MQTT command on %s: %s', topic, payload_raw if isinstance(payload_raw, str) else '<binary>')
+                self._handle_mqtt_command(cmd, payload_raw)
         except Exception as e:
             self.log.warning('Failed handling MQTT message: %s', e)
 
@@ -1737,6 +1823,9 @@ class monitor_and_display:
 
     def _on_mqtt_disconnect(self, client, userdata, rc, properties=None):
         try:
+            # Guard against paho firing the callback twice for the same disconnection
+            if not self._mqtt_is_connected:
+                return
             self._mqtt_is_connected = False
             rc_val = getattr(rc, 'value', rc)
             self.log.warning('MQTT disconnected (rc=%s)', str(rc_val))
@@ -2067,7 +2156,7 @@ class monitor_and_display:
                 self._mqtt.publish(self.mqtt_slideshow_available_topic, payload, qos=0, retain=True)
             avail_paths = {img['path'] for img in images}
             uploaded_overlap = uploaded_paths & avail_paths
-            self.log.info('Published slideshow available: %d images across %d collections (uploaded overlap: %d/%d)',
+            self.log.debug('Published slideshow available: %d images across %d collections (uploaded overlap: %d/%d)',
                           len(images), len(selected_set), len(uploaded_overlap), len(uploaded_paths))
         except Exception as e:
             self.log.warning('MQTT slideshow available publish failed: %s', e)
@@ -2177,7 +2266,8 @@ class monitor_and_display:
                         )
                         opts = self._scan_collections()
                     else:
-                        self.log.info('Publishing %d collections from CSV (labels): %s', len(opts), opts)
+                        self.log.info('Publishing %d collections from CSV', len(opts))
+                        self.log.debug('Publishing collections from CSV (labels): %s', opts)
                 except Exception as e:
                     self.log.warning('Failed to derive collection label options from CSV; falling back to folders: %s', e)
                     opts = self._scan_collections()
@@ -2783,8 +2873,12 @@ class monitor_and_display:
         await self.initialize()
         while True:
             if not await self.safe_in_artmode():
-                backoff_delay = self.get_backoff_delay()
-                self.log.info('TV not in art mode; pausing %d seconds (backoff level %d)', backoff_delay, self.consecutive_failures)
+                backoff_delay = self.artmode_refresh_seconds or 1
+                if not self._not_in_artmode_logged:
+                    self.log.info('TV is not in art mode')
+                    self._not_in_artmode_logged = True
+                else:
+                    self.log.debug('TV is not in art mode')
                 if self._artmode_event:
                     self._artmode_event.clear()
                     try:
@@ -2795,6 +2889,7 @@ class monitor_and_display:
                 else:
                     await asyncio.sleep(backoff_delay)
                 continue
+            self._not_in_artmode_logged = False
             await self.check_dir()
             # Periodically republish current artwork state to keep MQTT fresh
             try:
@@ -2900,7 +2995,8 @@ class monitor_and_display:
                     self._publish_mqtt_state('Standby', 'standby.png', None)
                     self.log.info('Standby selected before cleanup: %s', self.standby_content_id)
                 except Exception as e:
-                    self.log.warning('Failed to select standby before cleanup: %s', e)
+                    self.log.warning('Failed to select standby before cleanup: %s — invalidating standby_content_id so it will be re-uploaded next run', e)
+                    self.standby_content_id = None
 
             # Snapshot the current selection so the next pick avoids repeating the same images
             self._last_slideshow_paths = {
