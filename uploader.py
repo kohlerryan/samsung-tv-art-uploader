@@ -885,28 +885,49 @@ class monitor_and_display:
 
         Art API 0.97 (2018/2019 firmware): WS-binary frame upload.
         All other versions: D2D socket upload via the samsungtvws library.
+
+        When api_version could not be determined (api_version_failed), try D2D first;
+        if it fails with error -1, automatically fall back to WS-binary and latch
+        api_version_str to '0.97' so subsequent uploads skip the failing D2D path.
         '''
         if self.api_version_str == '0.97':
             return await self._upload_ws_binary(file_data, file_type, matte)
+        if getattr(self, 'api_version_failed', False):
+            try:
+                return await self.tv.upload(file_data, file_type=file_type, matte=matte, portrait_matte=matte)
+            except Exception as e:
+                if 'error number -1' in str(e):
+                    self.log.warning(
+                        'D2D upload failed with error -1 and api_version is unknown — '
+                        'retrying with WS-binary path (2018/2019 Frame TV fallback)'
+                    )
+                    result = await self._upload_ws_binary(file_data, file_type, matte)
+                    if result:
+                        # Latch so all subsequent uploads use the binary path directly
+                        self.api_version_str = '0.97'
+                        self.log.info('WS-binary upload succeeded — latching api_version_str to 0.97 for this session')
+                    return result
+                raise
         return await self.tv.upload(file_data, file_type=file_type, matte=matte, portrait_matte=matte)
 
     def _warn_upload_compat(self, error):
-        '''Emit a one-time diagnostic when uploads fail with error -1 on a TV with unknown old API.'''
+        '''Emit a one-time diagnostic when uploads fail with error -1 on a TV with unknown old API.
+        Not fired when api_version_failed is set, since _upload_to_tv handles that with an
+        automatic WS-binary fallback.'''
         if self._upload_compat_warned:
             return
         if 'error number -1' not in str(error):
             return
-        # Only fire when api_version itself failed (truly unknown protocol).
-        # Art API 0.97 is handled by _upload_ws_binary, so errors there indicate
-        # a different problem and don't need this generic hint.
+        # Suppress: _upload_to_tv handles the fallback automatically in this case
         if self.api_version_failed:
-            self._upload_compat_warned = True
-            self.log.warning(
-                'Upload failed with error -1 on a TV whose api_version could not be determined. '
-                'If this is a 2018/2019 Frame TV, the WS-binary upload path may not have been '
-                'selected — check that api_version returns "0.97" in the logs. '
-                'See https://github.com/xchwarze/samsung-tv-ws-api/issues/130 for background.'
-            )
+            return
+        self._upload_compat_warned = True
+        self.log.warning(
+            'Upload failed with error -1 on a TV whose api_version could not be determined. '
+            'If this is a 2018/2019 Frame TV, the WS-binary upload path may not have been '
+            'selected — check that api_version returns "0.97" in the logs. '
+            'See https://github.com/xchwarze/samsung-tv-ws-api/issues/130 for background.'
+        )
 
     async def check_matte(self):
         '''
