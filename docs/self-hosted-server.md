@@ -1,6 +1,6 @@
 # Self-hosted server guide
 
-This guide walks through running `samsung-tv-art` as a persistent, self-updating server on a low-power ARM single-board computer — using a **Radxa Zero 3E** as the reference device. The same steps apply to any Debian-based ARM or x86 host.
+This guide walks through running `samsung-tv-art` as a persistent, self-updating server on a **Radxa Zero 3E**.
 
 The result is a headless server that:
 - runs the uploader and a local Mosquitto MQTT broker 24/7
@@ -11,7 +11,7 @@ The result is a headless server that:
 
 ## What you need
 
-- A **Radxa Zero 3E** (or similar ARM SBC / any x86 Linux machine)
+- A **Radxa Zero 3E**
 - A microSD card (≥16 GB recommended)
 - Ethernet connection to your LAN (same network as the Frame TV)
 - A computer to flash the SD card and SSH from
@@ -38,11 +38,11 @@ Radxa OS supports placing a `config.txt` and `before.txt` on the boot partition 
 
 | File | Purpose |
 |---|---|
-| [`config.txt`](../examples/headless/config.txt) | Sets hostname, username, and password |
-| [`before.txt`](../examples/headless/before.txt) | Radxa first-boot DSL — handles user creation, root resize, SSH enable |
+| [`config.txt`](../examples/headless/config.txt) | Radxa hardware/overlay config (placed on boot partition alongside `before.txt`) |
+| [`before.txt`](../examples/headless/before.txt) | Radxa first-boot DSL — set your hostname and password here, handles user creation, root resize, SSH enable |
 | [`setup.sh`](../examples/headless/setup.sh) | Bash script to install Docker and start all containers — run once after SSH-ing in |
 
-> **Important:** `before.txt` uses a Radxa-specific DSL, not bash. It handles OS-level setup (users, groups, root resize, SSH). The Docker setup is done separately by running `setup.sh` after first boot.
+> **Important:** `before.txt` uses a Radxa-specific DSL, not bash — shell variables are not supported, edit values directly in the commands. Change the password in the `add_user` line before copying to the SD card. The `update_generic_hostname` codenames must match those in your image's default `before.txt` — check before copying. Hostname is best set after first boot with `sudo hostnamectl set-hostname samsung-tv-art`.
 
 Copy `config.txt` and `before.txt` to the boot partition after flashing. When the board comes up, SSH in and run `setup.sh`.
 
@@ -52,14 +52,33 @@ Insert the card, connect ethernet, and power on. The board will boot in around 3
 
 ## 2. SSH in
 
-Find the board's IP from your router, or try:
+Find the board's IP from your router and SSH in using that:
 ```bash
-ssh radxa@radxa.local
+ssh uploader@<board-ip>
 ```
 
-Default credentials: **user** `radxa` / **password** `radxa`. Change the password before doing anything else:
+Default credentials: **user** `uploader` / **password** as set in `before.txt` (default: `changeme`). Change the password before doing anything else:
 ```bash
 passwd
+```
+
+Then set the hostname so the board is reachable at `samsung-tv-art.local` on your LAN:
+```bash
+OLD_HOSTNAME=$(hostname)
+sudo hostnamectl set-hostname samsung-tv-art
+sudo sed -i "s/$OLD_HOSTNAME/samsung-tv-art/g" /etc/hosts
+```
+
+> `sudo: unable to resolve host samsung-tv-art` warnings from these commands are harmless — sudo can't resolve the new hostname until `/etc/hosts` is updated, but the commands complete successfully.
+
+Then restart avahi so the new `.local` hostname is advertised on your LAN:
+```bash
+sudo systemctl restart avahi-daemon
+```
+
+Reconnect using the new hostname to confirm it works:
+```bash
+ssh uploader@samsung-tv-art.local
 ```
 
 ---
@@ -140,17 +159,13 @@ SAMSUNG_TV_ART_MQTT_PORT=1883
 # SAMSUNG_TV_ART_MQTT_DISCOVERY=true
 # SAMSUNG_TV_ART_MQTT_DISCOVERY_PREFIX=homeassistant
 
-# ── Art collections from git (optional) ───────────────────────────────────────
-# Space-separated list of git repo URLs to fetch artwork from.
-# Leave blank to use only the local ./media bind-mount.
-# SAMSUNG_TV_ART_COLLECTIONS=https://github.com/you/Claude_Monet.git https://github.com/you/Edgar_Degas.git
-# SAMSUNG_TV_ART_FETCH_ON_START=false
-
 # ── Web UI ────────────────────────────────────────────────────────────────────
 SAMSUNG_TV_ART_LOCAL_WEB=true
 ```
 
 See `examples/samsung-tv-art.env.example` in the repo for the full list of options.
+
+> **Collections are managed via the web UI.** Once the container is running, open `http://samsung-tv-art.local:8080`, go to the **Settings** tab, and use the **Collections** section to select artwork repos and trigger a fetch. No env var needed.
 
 ---
 

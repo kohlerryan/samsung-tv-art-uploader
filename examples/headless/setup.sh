@@ -8,7 +8,7 @@
 #
 # ── Before running ────────────────────────────────────────────────────────────
 #   Set TV_IP below to the IP address of your Samsung Frame TV.
-#   Optionally uncomment COLLECTIONS to fetch artwork from git repos.
+#   Collections are selected after setup via the web UI (Settings → Collections).
 # ─────────────────────────────────────────────────────────────────────────────
 
 set -e
@@ -17,7 +17,6 @@ set -e
 
 TV_IP="CHANGE_ME"           # IP address of your Samsung Frame TV
 MQTT_PASSWORD=""            # leave blank for anonymous MQTT access
-# COLLECTIONS="https://github.com/kohlerryan/Abbott_Handerson_Thayer.git https://github.com/kohlerryan/Adalbert_Stifter.git https://github.com/kohlerryan/Akseli_Gallen-Kallela.git https://github.com/kohlerryan/Albert_Bierstadt.git https://github.com/kohlerryan/Alfred_Sisley.git https://github.com/kohlerryan/Alphonse_Mucha.git https://github.com/kohlerryan/Andy_Warhol.git https://github.com/kohlerryan/Antoine_Chintreuil.git https://github.com/kohlerryan/Arthur_Streeton.git https://github.com/kohlerryan/Banksy.git https://github.com/kohlerryan/Berthe_Morisot.git https://github.com/kohlerryan/Camille_Pissarro.git https://github.com/kohlerryan/Charles_Marion_Russell.git https://github.com/kohlerryan/Childe_Hassam.git https://github.com/kohlerryan/Claude_Monet.git https://github.com/kohlerryan/Diego_Velazquez.git https://github.com/kohlerryan/Edgar_Degas.git https://github.com/kohlerryan/Edouard_Manet.git https://github.com/kohlerryan/Edvard_Munch.git https://github.com/kohlerryan/Edward_Hopper.git https://github.com/kohlerryan/El_Greco.git https://github.com/kohlerryan/Eugene_Boudin.git https://github.com/kohlerryan/Eugene_Delacroix.git https://github.com/kohlerryan/Francois_Boucher.git https://github.com/kohlerryan/Franz_Marc.git https://github.com/kohlerryan/Frederic_Remington.git https://github.com/kohlerryan/Frederick_McCubbin.git https://github.com/kohlerryan/George_Stubbs.git https://github.com/kohlerryan/George_Wesley_Bellows.git https://github.com/kohlerryan/Georges_Seurat.git https://github.com/kohlerryan/Gustav_Courbet.git https://github.com/kohlerryan/Gustav_Klimt.git https://github.com/kohlerryan/Gustave_Caillebotte.git https://github.com/kohlerryan/Henri_de_Toulouse-Lautrec.git https://github.com/kohlerryan/Henri_Matisse.git https://github.com/kohlerryan/Henri_Rousseau.git https://github.com/kohlerryan/Jackson_Pollock.git https://github.com/kohlerryan/Jacob_Maris.git https://github.com/kohlerryan/Keith_Haring.git https://github.com/kohlerryan/Leonardo_da_Vinci.git https://github.com/kohlerryan/Marc_Chagall.git https://github.com/kohlerryan/Mark_Rothko.git https://github.com/kohlerryan/Mary_Cassatt.git https://github.com/kohlerryan/Max_Ernst.git https://github.com/kohlerryan/Norman_Rockwell.git https://github.com/kohlerryan/Pablo_Picasso.git https://github.com/kohlerryan/Paul_Cezanne.git https://github.com/kohlerryan/Paul_Gauguin.git https://github.com/kohlerryan/Paul_Klee.git https://github.com/kohlerryan/Pierre-Auguste_Renoir.git https://github.com/kohlerryan/Rembrandt_Harmenszoon_van_Rijn.git https://github.com/kohlerryan/Sandro_Botticelli.git https://github.com/kohlerryan/Vincent_van_Gogh.git https://github.com/kohlerryan/Winslow_Homer.git"
 
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -112,7 +111,6 @@ SAMSUNG_TV_ART_SEQUENTIAL=false
 SAMSUNG_TV_ART_MQTT_HOST=localhost
 SAMSUNG_TV_ART_MQTT_PORT=1883
 SAMSUNG_TV_ART_LOCAL_WEB=true
-${COLLECTIONS:+SAMSUNG_TV_ART_COLLECTIONS=${COLLECTIONS}}
 ${MQTT_PASSWORD:+SAMSUNG_TV_ART_MQTT_PASSWORD=${MQTT_PASSWORD}}
 EOF
 fi
