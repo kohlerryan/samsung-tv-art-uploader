@@ -117,7 +117,8 @@ fi
 # ── Auto-update cron jobs ────────────────────────────────────────────────────
 # Pulls and recreates the samsung-tv-art container if a new image is available.
 # Runs at boot (after a short delay for Docker to be ready) and nightly at 3am.
-UPDATE_CMD="cd '$PROJECT_DIR' && docker compose pull samsung-tv-art && docker compose up -d samsung-tv-art >> '$PROJECT_DIR/update.log' 2>&1"
+# PATH is set explicitly so docker is found in cron's minimal environment.
+UPDATE_CMD="PATH=/usr/local/bin:/usr/bin:/bin && cd '$PROJECT_DIR' && docker compose pull samsung-tv-art && docker compose up -d samsung-tv-art >> '$PROJECT_DIR/update.log' 2>&1"
 if ! crontab -l 2>/dev/null | grep -qF '@reboot'; then
     (crontab -l 2>/dev/null; echo "@reboot sleep 15 && $UPDATE_CMD") | crontab -
     echo "Auto-update @reboot cron job installed."
