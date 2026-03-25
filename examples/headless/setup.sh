@@ -118,10 +118,13 @@ fi
 # Pulls and recreates the samsung-tv-art container if a new image is available.
 # Runs at boot (after a short delay for Docker to be ready) and nightly at 3am.
 UPDATE_CMD="cd '$PROJECT_DIR' && docker compose pull samsung-tv-art && docker compose up -d samsung-tv-art >> '$PROJECT_DIR/update.log' 2>&1"
-if ! crontab -l 2>/dev/null | grep -qF 'samsung-tv-art'; then
+if ! crontab -l 2>/dev/null | grep -qF '@reboot'; then
     (crontab -l 2>/dev/null; echo "@reboot sleep 15 && $UPDATE_CMD") | crontab -
+    echo "Auto-update @reboot cron job installed."
+fi
+if ! crontab -l 2>/dev/null | grep -qF '0 3 * * *'; then
     (crontab -l 2>/dev/null; echo "0 3 * * * $UPDATE_CMD") | crontab -
-    echo "Auto-update cron jobs installed."
+    echo "Auto-update 3am cron job installed."
 fi
 
 # ── Start ─────────────────────────────────────────────────────────────────────
