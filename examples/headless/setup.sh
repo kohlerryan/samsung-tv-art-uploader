@@ -105,6 +105,12 @@ ${MQTT_PASSWORD:+SAMSUNG_TV_ART_MQTT_PASSWORD=${MQTT_PASSWORD}}
 EOF
 fi
 
+# ── Cron ─────────────────────────────────────────────────────────────────────
+if ! command -v crontab &>/dev/null; then
+    sudo apt-get install -y cron
+    sudo systemctl enable cron
+fi
+
 # ── Auto-update cron jobs ────────────────────────────────────────────────────
 # Pulls and recreates the samsung-tv-art container if a new image is available.
 # Runs at boot (after a short delay for Docker to be ready) and nightly at 3am.
