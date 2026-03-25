@@ -407,7 +407,7 @@
           <div id="sl-msg" class="hint" style="margin-top:8px;"></div>
         </div>
       </div>
-      <span class="version-tag">v0.2.4</span>
+      <span class="version-tag">v0.2.5</span>
     </div>
   </div>
   <script>
@@ -983,7 +983,7 @@
       const isStandby = normalizedFile === 'standby.png';
       slideshowStandby = isStandbyLike;
       updateGridLock();
-      if (_updateSettingsBtnState) _updateSettingsBtnState(isStandbyLike);
+      if (_updateSettingsBtnState) _updateSettingsBtnState(isNotInArtMode, isNotInArtMode);
 
       let t = '';
       if (isNotInArtMode) {
@@ -1480,7 +1480,7 @@
         _collListMarkDirty();
       };
     }
-    _updateSettingsBtnState = function(blocked) {
+    _updateSettingsBtnState = function(blocked, notInArtMode) {
       if (blocked) {
         tvBlocked = true;
         $applyEnv.disabled = true; $applyEnv.style.opacity = 0.5;
@@ -1488,7 +1488,11 @@
         $syncCollections.disabled = true; $syncCollections.style.opacity = 0.5;
         if ($refresh) { $refresh.disabled = true; $refresh.style.opacity = 0.5; }
         if ($slApply) { $slApply.disabled = true; $slApply.style.opacity = 0.5; }
-        if ($envMsg) $envMsg.textContent = 'TV is not in Art Mode \u2014 Refresh and Settings unavailable.';
+        if ($envMsg) {
+          $envMsg.textContent = notInArtMode
+            ? 'TV is not in Art Mode \u2014 Refresh and Settings unavailable.'
+            : 'Waiting for artwork \u2014 Refresh and Settings will unlock once the uploader connects.';
+        }
       } else {
         tvBlocked = false;
         markEnvDirty();
@@ -1500,7 +1504,7 @@
         }
         updateButtons();
         markSlSettingsDirty();
-        if ($envMsg && $envMsg.textContent === 'TV is not in Art Mode \u2014 Refresh and Settings unavailable.') $envMsg.textContent = '';
+        if ($envMsg && ($envMsg.textContent.startsWith('TV is not in Art Mode') || $envMsg.textContent.startsWith('Waiting for artwork'))) $envMsg.textContent = '';
       }
     };
 

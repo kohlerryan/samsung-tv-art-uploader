@@ -1,5 +1,5 @@
 /**
- * Frame TV Art Card v0.2.2
+ * Frame TV Art Card v0.2.3
  */
 
 class FrameTVArtCard extends HTMLElement {
@@ -985,7 +985,9 @@ class FrameTVArtCard extends HTMLElement {
     const bgUrl = this._refreshInProgress ? standbyBgUrl : this._getBackgroundUrl();
     const isNotInArtMode = !inArtMode;
     const isStandby = isNotInArtMode || this._refreshInProgress || !normalizedFile || normalizedFile === 'standby.png' || normalizedFile === 'unknown' || normalizedFile === 'unavailable' || normalizedFile === 'none';
-    this._isStandbyLike = isStandby;
+    // Buttons should only be blocked when TV is truly not in Art Mode, not just because
+    // no artwork has been selected yet (standby-like but in Art Mode).
+    this._isStandbyLike = isNotInArtMode || this._refreshInProgress;
     this._isNotInArtMode = isNotInArtMode;
     const hasArtwork = bgUrl !== null;
     const isCompressed = (this._config.layout_mode || 'fixed') !== 'dynamic';
@@ -2260,7 +2262,7 @@ class FrameTVArtCard extends HTMLElement {
     }
   }
 
-console.info('%c FRAME-TV-ART-CARD %c v0.2.2 ', 'color: white; background: #03a9f4; font-weight: bold;', '');
+console.info('%c FRAME-TV-ART-CARD %c v0.2.3 ', 'color: white; background: #03a9f4; font-weight: bold;', '');
 
 // Register custom element so Lovelace can use <frame-tv-art-card>
 try {

@@ -10,7 +10,7 @@ A custom [Home Assistant](https://www.home-assistant.io/) Lovelace card for cont
 
 > **Upgrading from v0.1.x?** See the [v0.2.0 release notes](https://github.com/kohlerryan/samsung-tv-art-card/releases/tag/v0.2.0) for breaking changes and what's new.
 
-> **Upgrading from v0.2.x?** See the [v0.2.2 release notes](https://github.com/kohlerryan/samsung-tv-art-card/releases/tag/v0.2.2) for what's new.
+> **Upgrading from v0.2.x?** See the [v0.2.3 release notes](https://github.com/kohlerryan/samsung-tv-art-card/releases/tag/v0.2.3) for what's new.
 
 ---
 
@@ -60,7 +60,7 @@ A custom [Home Assistant](https://www.home-assistant.io/) Lovelace card for cont
    ```yaml
    lovelace:
      resources:
-         url: /local/samsung-tv-art-card/samsung-tv-art-card.js?v=v0.2.2
+         url: /local/samsung-tv-art-card/samsung-tv-art-card.js?v=v0.2.3
          type: module
    ```
 
@@ -154,4 +154,4 @@ The 1-minute delay gives the `samsung-tv-art` backend container time to fully st
 
 ## Version
 
-Current version: **v0.2.2** — bump the `?v=` cache-buster in the resource URL whenever you upgrade.
+Current version: **v0.2.3** — bump the `?v=` cache-buster in the resource URL whenever you upgrade.
