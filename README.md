@@ -12,7 +12,7 @@ Built on top of [NickWaterton/samsung-tv-ws-api](https://github.com/NickWaterton
 
 > **Upgrading from v0.1.x?** See the [v0.2.0 release notes](https://github.com/kohlerryan/samsung-tv-art-uploader/releases/tag/v0.2.0) for breaking changes and what's new.
 
-> **Upgrading from v0.2.x?** See the [v0.2.3 release notes](https://github.com/kohlerryan/samsung-tv-art-uploader/releases/tag/v0.2.3) for what's new.
+> **Upgrading from v0.2.x?** See the [v0.2.4 release notes](https://github.com/kohlerryan/samsung-tv-art-uploader/releases/tag/v0.2.4) for what's new.
 
 ## Features
 

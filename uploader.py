@@ -541,7 +541,13 @@ class monitor_and_display:
         else:
             self.log.info('Start Monitoring')
             try:
-                await asyncio.wait_for(self.tv.start_listening(), timeout=15)
+                # Use a longer timeout when no token exists (first-time pairing) so the
+                # user has time to see and accept the pairing prompt on the TV.
+                needs_pairing = not self.token_file or not os.path.exists(self.token_file)
+                connect_timeout = 120 if needs_pairing else 15
+                if needs_pairing:
+                    self.log.info('No token file found — waiting up to %ds for TV pairing approval', connect_timeout)
+                await asyncio.wait_for(self.tv.start_listening(), timeout=connect_timeout)
                 self.log.info('Started')
             except asyncio.TimeoutError:
                 self.log.warning('TV connection timed out at startup — will retry in main loop')
