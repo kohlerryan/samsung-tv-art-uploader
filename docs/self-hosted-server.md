@@ -200,16 +200,6 @@ services:
     depends_on:
       - mosquitto
 
-  watchtower:
-    image: containrrr/watchtower
-    container_name: watchtower
-    restart: unless-stopped
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    environment:
-      - WATCHTOWER_CLEANUP=true        # remove old image after update
-      - WATCHTOWER_POLL_INTERVAL=3600  # check for new releases every hour
-    command: samsung-tv-art            # only watch this container
 ```
 
 `network_mode: host` is used throughout so the uploader can reach the TV via mDNS/multicast and so Mosquitto is reachable at `localhost` from inside the uploader container.
@@ -253,13 +243,22 @@ http://<radxa-ip>:8080
 
 ## Automatic updates
 
-Watchtower checks GHCR every hour. When a new `latest` image is pushed it will:
-1. Pull the new image
-2. Stop and remove the old container
-3. Start a fresh container with the same config
-4. Delete the old image (cleanup enabled)
+`setup.sh` installs two cron jobs for the `uploader` user:
 
-No manual intervention required.
+| Trigger | Action |
+|---|---|
+| Boot (after 15s delay) | Pull latest image and recreate container if changed |
+| Daily at 3am | Same |
+
+Logs are written to `~/samsung-tv-art/update.log`. To inspect them:
+```bash
+tail -f ~/samsung-tv-art/update.log
+```
+
+To trigger an immediate update manually:
+```bash
+cd ~/samsung-tv-art && docker compose pull samsung-tv-art && docker compose up -d samsung-tv-art
+```
 
 ---
 
@@ -270,5 +269,5 @@ No manual intervention required.
 | View live uploader logs | `docker compose logs -f samsung-tv-art` |
 | Restart the uploader | `docker compose restart samsung-tv-art` |
 | Stop everything | `docker compose down` |
-| Force an immediate update check | `docker run --rm -v /var/run/docker.sock:/var/run/docker.sock containrrr/watchtower --run-once samsung-tv-art` |
+| Force an immediate update | `cd ~/samsung-tv-art && docker compose pull samsung-tv-art && docker compose up -d samsung-tv-art` |
 | Check Mosquitto logs | `tail -f mosquitto/log/mosquitto.log` |

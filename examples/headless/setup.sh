@@ -88,16 +88,6 @@ services:
     depends_on:
       - mosquitto
 
-  watchtower:
-    image: containrrr/watchtower
-    container_name: watchtower
-    restart: unless-stopped
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    environment:
-      - WATCHTOWER_CLEANUP=true
-      - WATCHTOWER_POLL_INTERVAL=3600
-    command: samsung-tv-art
 EOF
 fi
 
@@ -113,6 +103,16 @@ SAMSUNG_TV_ART_MQTT_PORT=1883
 SAMSUNG_TV_ART_LOCAL_WEB=true
 ${MQTT_PASSWORD:+SAMSUNG_TV_ART_MQTT_PASSWORD=${MQTT_PASSWORD}}
 EOF
+fi
+
+# ── Auto-update cron jobs ────────────────────────────────────────────────────
+# Pulls and recreates the samsung-tv-art container if a new image is available.
+# Runs at boot (after a short delay for Docker to be ready) and nightly at 3am.
+UPDATE_CMD="cd '$PROJECT_DIR' && docker compose pull samsung-tv-art && docker compose up -d samsung-tv-art >> '$PROJECT_DIR/update.log' 2>&1"
+if ! crontab -l 2>/dev/null | grep -qF 'samsung-tv-art'; then
+    (crontab -l 2>/dev/null; echo "@reboot sleep 15 && $UPDATE_CMD") | crontab -
+    (crontab -l 2>/dev/null; echo "0 3 * * * $UPDATE_CMD") | crontab -
+    echo "Auto-update cron jobs installed."
 fi
 
 # ── Start ─────────────────────────────────────────────────────────────────────
