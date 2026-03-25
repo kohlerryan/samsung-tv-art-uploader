@@ -55,6 +55,9 @@ if [ ! -f "$PROJECT_DIR/mosquitto/config/mosquitto.conf" ]; then
     cat > "$PROJECT_DIR/mosquitto/config/mosquitto.conf" << 'EOF'
 listener 1883
 allow_anonymous true
+listener 9001
+protocol websockets
+allow_anonymous true
 persistence true
 persistence_location /mosquitto/data/
 log_dest file /mosquitto/log/mosquitto.log
