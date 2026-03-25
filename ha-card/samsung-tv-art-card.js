@@ -1,5 +1,5 @@
 /**
- * Frame TV Art Card v0.2.2-beta.3
+ * Frame TV Art Card v0.2.2
  */
 
 class FrameTVArtCard extends HTMLElement {
@@ -2260,7 +2260,7 @@ class FrameTVArtCard extends HTMLElement {
     }
   }
 
-console.info('%c FRAME-TV-ART-CARD %c v0.2.2-beta.3 ', 'color: white; background: #03a9f4; font-weight: bold;', '');
+console.info('%c FRAME-TV-ART-CARD %c v0.2.2 ', 'color: white; background: #03a9f4; font-weight: bold;', '');
 
 // Register custom element so Lovelace can use <frame-tv-art-card>
 try {

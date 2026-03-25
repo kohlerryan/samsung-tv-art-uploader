@@ -11,7 +11,7 @@ The result is a headless server that:
 
 ## What you need
 
-- A **Radxa Zero 3E**
+- A **Radxa Zero 3E** — STL files for a printable case are included in [`hardware/radxa-zero-3e-case/`](../hardware/radxa-zero-3e-case/) ([source on Printables](https://www.printables.com/model/1306428-radxa-zero-3e-case))
 - A microSD card (≥16 GB recommended)
 - Ethernet connection to your LAN (same network as the Frame TV)
 - A computer to flash the SD card and SSH from
