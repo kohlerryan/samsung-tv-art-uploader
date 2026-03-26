@@ -1,6 +1,6 @@
 # Self-hosted server guide
 
-This guide walks through running `samsung-tv-art` as a persistent, self-updating server on a **Radxa Zero 3E**.
+This guide walks through running `samsung-tv-art` as a persistent, self-updating server on a **Raspberry Pi Zero 2 W**.
 
 The result is a headless server that:
 - runs the uploader and a local Mosquitto MQTT broker 24/7
@@ -11,75 +11,59 @@ The result is a headless server that:
 
 ## What you need
 
-- A **Radxa Zero 3E** — STL files for a printable case are included in [`hardware/radxa-zero-3e-case/`](../hardware/radxa-zero-3e-case/) ([source on Printables](https://www.printables.com/model/1306428-radxa-zero-3e-case))
+- A **Raspberry Pi Zero 2 W** (arm64, runs cool, ~$15)
 - A microSD card (≥16 GB recommended)
-- Ethernet connection to your LAN (same network as the Frame TV)
+- WiFi connection to your LAN (same network as the Frame TV) — or a USB-OTG ethernet adapter
 - A computer to flash the SD card and SSH from
 
 ---
 
 ## 1. Flash the OS
 
-Download the **Debian Bookworm minimal** image for the Radxa Zero 3E from the [Radxa downloads page](https://docs.radxa.com/en/zero/zero3/download). Choose the minimal/server image — no desktop environment is needed.
+Download and open [Raspberry Pi Imager](https://www.raspberrypi.com/software/).
 
-Flash it to your SD card with [Balena Etcher](https://etcher.balena.io/) or Raspberry Pi Imager (both support custom images). On Linux, `dd` is the most reliable option:
+1. **Choose Device** → Raspberry Pi Zero 2 W
+2. **Choose OS** → Raspberry Pi OS (other) → **Raspberry Pi OS Lite (64-bit)**
+3. **Choose Storage** → your SD card
+4. Click **Next** → **Edit Settings** (OS Customisation)
 
-```bash
-# Find your SD card device (run before and after inserting card)
-lsblk
+In the customisation screen, configure everything now so no keyboard or monitor is ever needed:
 
-sudo dd if=radxa-zero3e.img of=/dev/sdX bs=4M status=progress conv=fsync
-sudo sync && sudo eject /dev/sdX
-```
-
-### Optional: headless first-boot files
-
-Radxa OS supports placing a `config.txt` and `before.txt` on the boot partition of the SD card before first boot. Example files are provided in [`examples/headless/`](../examples/headless/):
-
-| File | Purpose |
+| Setting | Value |
 |---|---|
-| [`config.txt`](../examples/headless/config.txt) | Radxa hardware/overlay config (placed on boot partition alongside `before.txt`) |
-| [`before.txt`](../examples/headless/before.txt) | Radxa first-boot DSL — set your hostname and password here, handles user creation, root resize, SSH enable |
-| [`setup.sh`](../examples/headless/setup.sh) | Bash script to install Docker and start all containers — run once after SSH-ing in |
+| Hostname | `samsung-tv-art` |
+| Username | `uploader` (or any name you prefer) |
+| Password | your choice |
+| Configure WiFi | your SSID and password |
+| Enable SSH | checked (use password auth or add your public key) |
 
-> **Important:** `before.txt` uses a Radxa-specific DSL, not bash — shell variables are not supported, edit values directly in the commands. Change the password in the `add_user` line before copying to the SD card. The `update_generic_hostname` codenames must match those in your image's default `before.txt` — check before copying. Hostname is best set after first boot with `sudo hostnamectl set-hostname samsung-tv-art`.
+Click **Save** → **Yes** → flash the card.
 
-Copy `config.txt` and `before.txt` to the boot partition after flashing. When the board comes up, SSH in and run `setup.sh`.
+Insert the card and power on. The Pi will boot and be reachable on your LAN in about 30–60 seconds.
 
-Insert the card, connect ethernet, and power on. The board will boot in around 30 seconds (or 2-3 minutes on first boot if using the automated setup).
+> The [`setup.sh`](../examples/headless/setup.sh) script handles everything after this point — Docker install, directory structure, config files, and starting all containers.
 
 ---
 
 ## 2. SSH in
 
-Find the board's IP from your router and SSH in using that:
-```bash
-ssh uploader@<board-ip>
-```
-
-Default credentials: **user** `uploader` / **password** as set in `before.txt` (default: `changeme`). Change the password before doing anything else:
-```bash
-passwd
-```
-
-Then set the hostname so the board is reachable at `samsung-tv-art.local` on your LAN:
-```bash
-OLD_HOSTNAME=$(hostname)
-sudo hostnamectl set-hostname samsung-tv-art
-sudo sed -i "s/$OLD_HOSTNAME/samsung-tv-art/g" /etc/hosts
-```
-
-> `sudo: unable to resolve host samsung-tv-art` warnings from these commands are harmless — sudo can't resolve the new hostname until `/etc/hosts` is updated, but the commands complete successfully.
-
-Then restart avahi so the new `.local` hostname is advertised on your LAN:
-```bash
-sudo systemctl restart avahi-daemon
-```
-
-Reconnect using the new hostname to confirm it works:
+If you set the hostname to `samsung-tv-art` in Pi Imager, connect directly:
 ```bash
 ssh uploader@samsung-tv-art.local
 ```
+
+Otherwise find the board's IP from your router and SSH in by IP, then set the hostname:
+```bash
+ssh uploader@<board-ip>
+
+# Set the hostname (so the board is reachable at samsung-tv-art.local)
+OLD_HOSTNAME=$(hostname)
+sudo hostnamectl set-hostname samsung-tv-art
+sudo sed -i "s/$OLD_HOSTNAME/samsung-tv-art/g" /etc/hosts
+sudo systemctl restart avahi-daemon
+```
+
+> `sudo: unable to resolve host` warnings during the hostname commands are harmless — they complete successfully.
 
 ---
 
@@ -239,7 +223,7 @@ http://samsung-tv-art.local:8080
 
 Or by IP:
 ```
-http://<radxa-ip>:8080
+http://<board-ip>:8080
 ```
 
 ---

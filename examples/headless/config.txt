@@ -1,6 +1,0 @@
-# Radxa hardware configuration (device tree overlays, etc.)
-# Place this file on the boot partition alongside before.txt.
-#
-# NOTE: Hostname and password are set in before.txt, not here.
-# The key=value format used here is for hardware/overlay settings only
-# and does not configure OS-level user or network settings on Radxa OS.

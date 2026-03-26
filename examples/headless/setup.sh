@@ -1,6 +1,6 @@
 #!/bin/bash
 # samsung-tv-art one-time setup script
-# Run this once after SSH-ing into your Radxa (or any Debian-based host).
+# Run this once after SSH-ing into your Raspberry Pi Zero 2 W (or any Debian-based host).
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/kohlerryan/samsung-tv-art-uploader/main/examples/headless/setup.sh | bash

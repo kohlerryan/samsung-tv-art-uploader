@@ -469,8 +469,10 @@ class monitor_and_display:
     
     def _create_tv_connection(self):
         """Create TV connection object. May raise if TV is unreachable."""
+        import socket
         from samsungtvws.async_art import SamsungTVAsyncArt
-        self.tv = SamsungTVAsyncArt(host=self.ip, port=8002, token_file=self.token_file)
+        device_name = os.environ.get('SAMSUNG_TV_ART_DEVICE_NAME') or socket.gethostname() or 'SamsungTvRemote'
+        self.tv = SamsungTVAsyncArt(host=self.ip, port=8002, token_file=self.token_file, name=device_name)
         self._artmode_event = asyncio.Event()
         self._register_artmode_callbacks()
 
