@@ -579,6 +579,11 @@ class monitor_and_display:
                     self._startup_in_progress = True
                     self._publish_slideshow_state()
                     self._publish_slideshow_available()
+                    # If TV is offline, clear any stale retained artwork state so the
+                    # web UI doesn't show "in art mode" from a previous session.
+                    if self.tv is None:
+                        self._in_art_mode = False
+                        self._publish_mqtt_state('Unavailable', 'unavailable', None)
                 await self.select_artwork()
             finally:
                 if self.tv is not None:
@@ -1977,7 +1982,7 @@ class monitor_and_display:
                 self._publish_and_wait(self.mqtt_state_topic, display or "", qos=1, retain=True)
             except Exception:
                 self._mqtt.publish(self.mqtt_state_topic, display or "", qos=0, retain=True)
-            attrs = {"file": file or "", "collection": collection or "", "in_art_mode": self._in_art_mode if self._in_art_mode is not None else True}
+            attrs = {"file": file or "", "collection": collection or "", "in_art_mode": bool(self._in_art_mode)}
             # Merge CSV columns (ensure every header key exists, even if blank)
             if self._csv_headers:
                 row = self._csv_by_file.get(file or "") or {}
