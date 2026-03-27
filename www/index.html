@@ -1485,7 +1485,6 @@
         tvBlocked = true;
         $applyEnv.disabled = true; $applyEnv.style.opacity = 0.5;
         $restartEnv.disabled = true; $restartEnv.style.opacity = 0.5;
-        $syncCollections.disabled = true; $syncCollections.style.opacity = 0.5;
         if ($refresh) { $refresh.disabled = true; $refresh.style.opacity = 0.5; }
         if ($slApply) { $slApply.disabled = true; $slApply.style.opacity = 0.5; }
         if ($envMsg) {
@@ -1497,7 +1496,6 @@
         tvBlocked = false;
         markEnvDirty();
         $restartEnv.disabled = false; $restartEnv.style.opacity = '';
-        $syncCollections.disabled = false; $syncCollections.style.opacity = '';
         if ($refresh) {
           if (!refreshInProgress) { $refresh.disabled = false; $refresh.style.opacity = ''; }
           // if refreshInProgress, stopRefreshSpinner() will re-enable once ack cycle finishes

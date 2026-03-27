@@ -2771,8 +2771,12 @@ class monitor_and_display:
                 except Exception:
                     pass
 
-            self.log.info('settings/sync_collections proceeding to TV reseed (req_id=%s)', req_id)
-            await self._do_full_reseed(req_id=req_id, skip_started_ack=True)
+            if self.tv is None:
+                self.log.info('settings/sync_collections: TV unavailable — skipping reseed, collections updated on disk only')
+                self._publish_ack('collections/refresh', 'done', 'Collections updated. TV reseed will happen automatically once the TV is reachable.', req_id)
+            else:
+                self.log.info('settings/sync_collections proceeding to TV reseed (req_id=%s)', req_id)
+                await self._do_full_reseed(req_id=req_id, skip_started_ack=True)
         except Exception as e:
             self.log.warning('settings/sync_collections exception: %s', e)
             self._publish_ack('collections/refresh', 'error', f'Exception: {e}', req_id)
