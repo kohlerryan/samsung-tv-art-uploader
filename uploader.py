@@ -518,7 +518,10 @@ class monitor_and_display:
         except Exception:
             self._loop = None
         # Create TV connection (may raise if TV offline)
-        self._create_tv_connection()
+        try:
+            self._create_tv_connection()
+        except Exception as e:
+            self.log.warning('TV unavailable at startup — MQTT/web UI will run without TV (retry on reconnect): %s', e)
         # Ensure CSV metadata is loaded before MQTT and selection logic.
         if self.require_csv_on_start:
             ready = await self._wait_for_csv_metadata()
@@ -538,30 +541,31 @@ class monitor_and_display:
         except Exception:
             pass
         
-        if self.on and not await self.tv.on():
+        if self.on and self.tv is not None and not await self.tv.on():
             self.log.info('TV is off, exiting')
         else:
             self.log.info('Start Monitoring')
-            try:
-                # Use a longer timeout when no token exists (first-time pairing) so the
-                # user has time to see and accept the pairing prompt on the TV.
-                needs_pairing = not self.token_file or not os.path.exists(self.token_file)
-                connect_timeout = 120 if needs_pairing else 15
-                if needs_pairing:
-                    self.log.info('No token file found — waiting up to %ds for TV pairing approval', connect_timeout)
-                await asyncio.wait_for(self.tv.start_listening(), timeout=connect_timeout)
-                self.log.info('Started')
-            except asyncio.TimeoutError:
-                self.log.warning('TV connection timed out at startup — will retry in main loop')
-            except Exception as e:
-                self.log.error('failed to connect with TV: {}'.format(e))
-            if self.tv.is_alive():
+            if self.tv is not None:
                 try:
-                    await self.check_matte()
-                    await self.ensure_standby_selected()
-                    await self.cleanup_old_uploads()
+                    # Use a longer timeout when no token exists (first-time pairing) so the
+                    # user has time to see and accept the pairing prompt on the TV.
+                    needs_pairing = not self.token_file or not os.path.exists(self.token_file)
+                    connect_timeout = 120 if needs_pairing else 15
+                    if needs_pairing:
+                        self.log.info('No token file found — waiting up to %ds for TV pairing approval', connect_timeout)
+                    await asyncio.wait_for(self.tv.start_listening(), timeout=connect_timeout)
+                    self.log.info('Started')
+                except asyncio.TimeoutError:
+                    self.log.warning('TV connection timed out at startup — will retry in main loop')
                 except Exception as e:
-                    self.log.warning('Startup TV setup error (non-fatal): %s', e)
+                    self.log.error('failed to connect with TV: {}'.format(e))
+                if self.tv.is_alive():
+                    try:
+                        await self.check_matte()
+                        await self.ensure_standby_selected()
+                        await self.cleanup_old_uploads()
+                    except Exception as e:
+                        self.log.warning('Startup TV setup error (non-fatal): %s', e)
             # Always run select_artwork — even if TV is not reachable right now,
             # the main loop will wait for art mode in the meantime.
             try:
@@ -577,7 +581,8 @@ class monitor_and_display:
                     self._publish_slideshow_available()
                 await self.select_artwork()
             finally:
-                await self.tv.close()
+                if self.tv is not None:
+                    await self.tv.close()
 
     async def _wait_for_csv_metadata(self):
         """Wait for CSV file and metadata headers to be available before startup continues."""
@@ -608,6 +613,14 @@ class monitor_and_display:
 
     async def reconnect_tv(self):
         """Gracefully reconnect to the TV websocket."""
+        # If TV connection object was never created (e.g. TV unreachable at startup),
+        # try to create it now before attempting start_listening.
+        if self.tv is None:
+            try:
+                self._create_tv_connection()
+            except Exception as e:
+                self.log.debug('TV still unavailable during reconnect: %s', e)
+                return False
         try:
             await self.tv.close()
         except Exception:

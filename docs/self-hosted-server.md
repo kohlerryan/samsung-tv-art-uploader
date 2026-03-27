@@ -23,7 +23,8 @@ The result is a headless server that:
 Download and open [Raspberry Pi Imager](https://www.raspberrypi.com/software/).
 
 1. **Choose Device** → Raspberry Pi Zero 2 W
-2. **Choose OS** → Raspberry Pi OS (other) → **Raspberry Pi OS Lite (64-bit)**
+2. **Choose OS** → Raspberry Pi OS (other) → **Raspberry Pi OS (Legacy, 64-bit) Lite**
+   > Use the **Legacy** image (Bullseye). The default Bookworm image uses cloud-init for first-boot configuration, which requires an extra manual step if Pi Imager's customisation prompt is accidentally dismissed. The Legacy image uses a simpler `firstrun.sh` mechanism that is more forgiving.
 3. **Choose Storage** → your SD card
 4. Click **Next** → **Edit Settings** (OS Customisation)
 
