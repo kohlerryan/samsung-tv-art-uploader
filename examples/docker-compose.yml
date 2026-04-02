@@ -16,7 +16,9 @@ services:
       # Persistent state: TV auth token, settings overrides, cache
       - ./data:/data
       # Artwork media bind-mount — place your collection folders here.
-      # Each subfolder becomes a selectable collection (e.g. media/Monet/, media/Degas/).
+      # Flat layout:    media/Monet/  media/Degas/   → each folder is one selectable collection.
+      # Grouped layout: media/Artists/Ryan_Kohler/   → subdirectories one level deep are each
+      #                 media/Artists/Kelly_Burns/     their own selectable collection.
       # Leave empty or omit if you are using SAMSUNG_TV_ART_COLLECTIONS to fetch git repos.
       - ./media:/app/frame_tv_art_collections
 

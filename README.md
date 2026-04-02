@@ -12,7 +12,7 @@ Built on top of [NickWaterton/samsung-tv-ws-api](https://github.com/NickWaterton
 
 > **Upgrading from v0.1.x?** See the [v0.2.0 release notes](https://github.com/kohlerryan/samsung-tv-art-uploader/releases/tag/v0.2.0) for breaking changes and what's new.
 
-> **Upgrading from v0.2.x?** See the [v0.2.7 release notes](https://github.com/kohlerryan/samsung-tv-art-uploader/releases/tag/v0.2.7) for what's new.
+> **Upgrading from v0.2.x?** See the [v0.2.8 release notes](https://github.com/kohlerryan/samsung-tv-art-uploader/releases/tag/v0.2.8) for what's new.
 
 ## Features
 
@@ -59,17 +59,31 @@ Open the web UI at `http://samsung-tv-art.local:8080` (or `http://<host-ip>:8080
 
 ### Collection folder structure
 
-Whether you use Git repos or a local bind-mount, every collection follows the same layout:
+Whether you use Git repos or a local bind-mount, collections can be organised in two ways:
 
+**Flat collection** — images live directly in a top-level folder:
 ```
 CollectionName/
-  artwork_data.csv          ← required: metadata for every image in this folder
+  artwork_data.csv          ← metadata for every image in this folder
   Artist_Year_Title.jpg
   Artist_Year_Title.jpg
   ...
 ```
 
-The folder name (`CollectionName`) becomes the selectable collection name in the UI and HA card.
+**Multi-collection repo / grouped artists** — images are one level deeper inside a parent folder. Useful when you want to group related collections under a single repo or directory:
+```
+Artists/
+  Ryan_Kohler/
+    artwork_data.csv
+    RyanKohler_2020_Painting.jpg
+    ...
+  Kelly_Burns/
+    artwork_data.csv
+    KellyBurns_2021_Artwork.jpg
+    ...
+```
+
+In both cases the innermost folder name (e.g. `CollectionName`, `Ryan_Kohler`) becomes the selectable collection label in the UI and HA card. Folders with no `artwork_data.csv` still appear in the dropdown — the images will rotate but the HA card will show no metadata.
 
 ---
 
@@ -81,7 +95,7 @@ The file must be UTF-8 encoded with a header row. The following columns are reco
 | Column | Required | Description |
 |---|---|---|
 | `artwork_file` | **Yes** | Exact filename of the image (e.g. `Monet_1906_Water_Lilies.jpg`) |
-| `artwork_dir` | **Yes** | Folder name this image belongs to — must match the collection folder name |
+| `artwork_dir` | **Yes** | Path of the collection folder relative to the media root — matches the collection folder name for flat collections (e.g. `Monet`) or the parent/subfolder path for grouped collections (e.g. `Artists/Ryan_Kohler`) |
 | `collection_name` | Conditional | Display name for the collection in the UI and HA card drop-down. **Required when a collection contains artwork by more than one artist** (see note below). Takes precedence over `artist_name` as the collection label. |
 | `artist_name` | Recommended | Artist's full name — shown bold in the HA card |
 | `artist_lifespan` | Recommended | e.g. `1840–1926` — shown next to artist name |
@@ -232,7 +246,9 @@ All 54 collections below are available as checkboxes in the web UI Settings tab.
 
 ### Option B — Local bind-mount
 
-Place collection subdirectories inside `./media`, each with their own `artwork_data.csv`:
+Place collection subdirectories inside `./media`. The container maps `./media` → `/app/frame_tv_art_collections`.
+
+**Flat layout** — one folder per collection:
 ```
 media/
   Monet/
@@ -241,10 +257,25 @@ media/
     ...
   Degas/
     artwork_data.csv
+    Degas_1874_Dance_Class.jpg
     ...
 ```
 
-Each subdirectory becomes a selectable collection. The container maps `./media` → `/app/frame_tv_art_collections`.
+**Grouped layout** — collections nested one level inside a parent folder (useful for organising by artist, style, etc.):
+```
+media/
+  Artists/
+    Ryan_Kohler/
+      artwork_data.csv
+      RyanKohler_2020_Painting.jpg
+      ...
+    Kelly_Burns/
+      artwork_data.csv
+      KellyBurns_2021_Artwork.jpg
+      ...
+```
+
+In both cases each innermost image-containing folder becomes a selectable collection. You can mix flat and grouped layouts freely. Click **Update & Refresh** in the settings panel to pick up newly added folders without restarting the container.
 
 ## Configuration
 
