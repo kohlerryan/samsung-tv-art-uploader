@@ -455,13 +455,21 @@ class monitor_and_display:
             target = self._normalize_collection_key(name)
             if not target:
                 return None
-            for d in self._scan_collections():
+            dirs = self._scan_collections()
+            for d in dirs:
                 if self._normalize_collection_key(d) == target:
+                    return d
+            # For subdirectory collections (e.g. "Artists/Kelly_Burns"), also try matching
+            # against just the leaf name so a bare label like "Kelly Burns" resolves correctly.
+            for d in dirs:
+                if self._normalize_collection_key(os.path.basename(d)) == target:
                     return d
             # common fallback: spaces in labels vs underscores on disk
             underscored = target.replace(' ', '_')
-            for d in self._scan_collections():
+            for d in dirs:
                 if d.lower() == underscored.lower():
+                    return d
+                if os.path.basename(d).lower() == underscored.lower():
                     return d
         except Exception:
             pass
@@ -2346,9 +2354,11 @@ class monitor_and_display:
                             csv_dirs.add(dn)
                     # Always merge in any on-disk folders not covered by the CSV so
                     # collections without a CSV entry still appear in the dropdown.
+                    # Use only the basename (leaf) as the display label so subdir collections
+                    # like "Artists/Kelly_Burns" show as "Kelly Burns", not the full path.
                     for d in self._scan_collections():
                         if d not in csv_dirs:
-                            pairs.add(d.replace('_', ' '))
+                            pairs.add(os.path.basename(d).replace('_', ' '))
                     opts = sorted(pairs)
                     if not opts:
                         # Fallback to folders if CSV produced nothing usable
