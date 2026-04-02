@@ -377,6 +377,7 @@ class monitor_and_display:
         self.csv_path = os.environ.get('SAMSUNG_TV_ART_CSV_PATH', '/app/artwork_data.csv')
         self._csv_headers = []
         self._csv_by_file = {}
+        self._csv_by_path = {}  # keyed by artwork_dir/artwork_file — avoids filename collisions across collections
         # Collections source (folders by default; optional unique artists from CSV)
         self.collections_from_csv = os.environ.get('SAMSUNG_TV_ART_COLLECTIONS_FROM_CSV', 'true').lower() in ['1','true','yes']
         # CSV change detection (polling)
@@ -1653,7 +1654,11 @@ class monitor_and_display:
             # Prefer collection from rel_path parent folder
             if rel_path:
                 parts = os.path.normpath(rel_path).split(os.sep)
-                if parts:
+                if len(parts) > 1:
+                    # Join all parts except the filename to support subdir collections
+                    # e.g. "Artists/Kelly_Burns/file.jpg" -> collection = "Artists/Kelly_Burns"
+                    collection = os.path.join(*parts[:-1])
+                elif parts:
                     collection = parts[0]
             else:
                 collection = os.path.basename(os.path.dirname(full_path))
@@ -1993,7 +1998,8 @@ class monitor_and_display:
             attrs = {"file": file or "", "collection": collection or "", "in_art_mode": bool(self._in_art_mode)}
             # Merge CSV columns (ensure every header key exists, even if blank)
             if self._csv_headers:
-                row = self._csv_by_file.get(file or "") or {}
+                path_key = f"{collection}/{file}" if collection and file else None
+                row = (path_key and getattr(self, '_csv_by_path', {}).get(path_key)) or self._csv_by_file.get(file or "") or {}
                 for h in self._csv_headers:
                     # Keep original header key names to match CSV
                     attrs[h] = str(row.get(h, "") or "")
@@ -2220,7 +2226,7 @@ class monitor_and_display:
                     continue
                 for fname in files:
                     path_rel = f"{collection}/{fname}"
-                    csv_rec = self._csv_by_file.get(fname, {})
+                    csv_rec = getattr(self, '_csv_by_path', {}).get(path_rel) or self._csv_by_file.get(fname, {})
                     artist = (csv_rec.get('artist_name') or '').strip()
                     if not artist:
                         artist = getattr(self, '_dir_to_artist', {}).get(collection, '').strip()
@@ -2875,6 +2881,7 @@ class monitor_and_display:
                 reader = csv.DictReader(f)
                 self._csv_headers = list(reader.fieldnames or [])
                 self._csv_by_file = {}
+                self._csv_by_path = {}
                 # Rebuild artist<->dir maps
                 self._artist_to_dir = {}
                 self._dir_to_artist = {}
@@ -2882,6 +2889,9 @@ class monitor_and_display:
                     key = (row.get('artwork_file') or '').strip()
                     if key:
                         self._csv_by_file[key] = row
+                        dn = (row.get('artwork_dir') or '').strip()
+                        if dn:
+                            self._csv_by_path[f"{dn}/{key}"] = row
                     # Build bidirectional mapping when columns exist
                     try:
                         an = (row.get('artist_name') or '').strip()
@@ -3056,7 +3066,9 @@ class monitor_and_display:
                 rel_path = rec.get('path_rel')
                 if rel_path:
                     parts = os.path.normpath(rel_path).split(os.sep)
-                    if parts:
+                    if len(parts) > 1:
+                        collection = os.path.join(*parts[:-1])
+                    elif parts:
                         collection = parts[0]
             except Exception:
                 collection = None
