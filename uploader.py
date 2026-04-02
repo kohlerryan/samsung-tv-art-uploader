@@ -2754,6 +2754,14 @@ class monitor_and_display:
             has_sources = bool(os.environ.get('SAMSUNG_TV_ART_COLLECTIONS')) or os.path.isfile('/data/collections.list')
             if not has_sources:
                 self.log.info('settings/sync_collections: no git sources configured; reseeding from local files only')
+                # Refresh the collections dropdown even when there are no git sources — the
+                # user may have added/removed folders in the media root since last startup.
+                try:
+                    self._publish_collections_state()
+                    self._publish_selected_collections_state()
+                    self._publish_settings_state()
+                except Exception:
+                    pass
             else:
                 fetch_ok = True
                 try:
