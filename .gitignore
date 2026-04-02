@@ -27,5 +27,8 @@ samsung-tv-art.env
 .DS_Store
 Thumbs.db
 
+# Personal packaging materials (not part of the public repo)
+packaging/
+
 # Local VS Code settings (personal tasks, deploy configs, etc.)
 .vscode/
