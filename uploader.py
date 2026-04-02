@@ -1997,10 +1997,48 @@ class monitor_and_display:
             self.log.warning('MQTT state publish failed: %s', e)
 
     def _scan_collections(self):
+        """Return list of collection paths relative to media_root.
+        A directory is a flat collection if it contains image files directly.
+        A directory with no images but with image-containing subdirectories is
+        treated as a multi-collection repo; each qualifying subdir is returned
+        as 'repo/subdir' (using os.sep-compatible join).
+        """
+        SKIP = {'@eaDir', '@tmp'}
+        IMAGE_EXT = {'.jpg', '.jpeg', '.png', '.bmp', '.tif'}
+
+        def _has_images(path):
+            try:
+                return any(
+                    os.path.isfile(os.path.join(path, f))
+                    and os.path.splitext(f)[1].lower() in IMAGE_EXT
+                    for f in os.listdir(path)
+                )
+            except Exception:
+                return False
+
         try:
-            entries = [d for d in os.listdir(self.media_root) if os.path.isdir(os.path.join(self.media_root, d))]
-            # Filter common NAS/system folders
-            return sorted([d for d in entries if d not in ['@eaDir', '@tmp']])
+            result = []
+            for d in sorted(os.listdir(self.media_root)):
+                if d in SKIP:
+                    continue
+                dir_path = os.path.join(self.media_root, d)
+                if not os.path.isdir(dir_path):
+                    continue
+                if _has_images(dir_path):
+                    # Flat collection — images live directly in this directory
+                    result.append(d)
+                else:
+                    # Possibly a multi-collection repo — check one level deeper
+                    try:
+                        for s in sorted(os.listdir(dir_path)):
+                            if s in SKIP:
+                                continue
+                            sub_path = os.path.join(dir_path, s)
+                            if os.path.isdir(sub_path) and _has_images(sub_path):
+                                result.append(os.path.join(d, s))
+                    except Exception:
+                        pass
+            return result
         except Exception as e:
             self.log.warning('Failed to scan collections in %s: %s', self.media_root, e)
             return []
