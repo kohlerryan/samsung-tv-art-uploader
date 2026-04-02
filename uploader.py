@@ -377,6 +377,7 @@ class monitor_and_display:
         self.csv_path = os.environ.get('SAMSUNG_TV_ART_CSV_PATH', '/app/artwork_data.csv')
         self._csv_headers = []
         self._csv_by_file = {}
+        self._csv_by_path = {}  # keyed by artwork_dir/artwork_file — avoids filename collisions across collections
         # Collections source (folders by default; optional unique artists from CSV)
         self.collections_from_csv = os.environ.get('SAMSUNG_TV_ART_COLLECTIONS_FROM_CSV', 'true').lower() in ['1','true','yes']
         # CSV change detection (polling)
@@ -455,13 +456,21 @@ class monitor_and_display:
             target = self._normalize_collection_key(name)
             if not target:
                 return None
-            for d in self._scan_collections():
+            dirs = self._scan_collections()
+            for d in dirs:
                 if self._normalize_collection_key(d) == target:
+                    return d
+            # For subdirectory collections (e.g. "Artists/Kelly_Burns"), also try matching
+            # against just the leaf name so a bare label like "Kelly Burns" resolves correctly.
+            for d in dirs:
+                if self._normalize_collection_key(os.path.basename(d)) == target:
                     return d
             # common fallback: spaces in labels vs underscores on disk
             underscored = target.replace(' ', '_')
-            for d in self._scan_collections():
+            for d in dirs:
                 if d.lower() == underscored.lower():
+                    return d
+                if os.path.basename(d).lower() == underscored.lower():
                     return d
         except Exception:
             pass
@@ -1645,7 +1654,11 @@ class monitor_and_display:
             # Prefer collection from rel_path parent folder
             if rel_path:
                 parts = os.path.normpath(rel_path).split(os.sep)
-                if parts:
+                if len(parts) > 1:
+                    # Join all parts except the filename to support subdir collections
+                    # e.g. "Artists/Kelly_Burns/file.jpg" -> collection = "Artists/Kelly_Burns"
+                    collection = os.path.join(*parts[:-1])
+                elif parts:
                     collection = parts[0]
             else:
                 collection = os.path.basename(os.path.dirname(full_path))
@@ -1985,7 +1998,8 @@ class monitor_and_display:
             attrs = {"file": file or "", "collection": collection or "", "in_art_mode": bool(self._in_art_mode)}
             # Merge CSV columns (ensure every header key exists, even if blank)
             if self._csv_headers:
-                row = self._csv_by_file.get(file or "") or {}
+                path_key = f"{collection}/{file}" if collection and file else None
+                row = (path_key and getattr(self, '_csv_by_path', {}).get(path_key)) or self._csv_by_file.get(file or "") or {}
                 for h in self._csv_headers:
                     # Keep original header key names to match CSV
                     attrs[h] = str(row.get(h, "") or "")
@@ -1997,10 +2011,48 @@ class monitor_and_display:
             self.log.warning('MQTT state publish failed: %s', e)
 
     def _scan_collections(self):
+        """Return list of collection paths relative to media_root.
+        A directory is a flat collection if it contains image files directly.
+        A directory with no images but with image-containing subdirectories is
+        treated as a multi-collection repo; each qualifying subdir is returned
+        as 'repo/subdir' (using os.sep-compatible join).
+        """
+        SKIP = {'@eaDir', '@tmp'}
+        IMAGE_EXT = {'.jpg', '.jpeg', '.png', '.bmp', '.tif'}
+
+        def _has_images(path):
+            try:
+                return any(
+                    os.path.isfile(os.path.join(path, f))
+                    and os.path.splitext(f)[1].lower() in IMAGE_EXT
+                    for f in os.listdir(path)
+                )
+            except Exception:
+                return False
+
         try:
-            entries = [d for d in os.listdir(self.media_root) if os.path.isdir(os.path.join(self.media_root, d))]
-            # Filter common NAS/system folders
-            return sorted([d for d in entries if d not in ['@eaDir', '@tmp']])
+            result = []
+            for d in sorted(os.listdir(self.media_root)):
+                if d in SKIP:
+                    continue
+                dir_path = os.path.join(self.media_root, d)
+                if not os.path.isdir(dir_path):
+                    continue
+                if _has_images(dir_path):
+                    # Flat collection — images live directly in this directory
+                    result.append(d)
+                else:
+                    # Possibly a multi-collection repo — check one level deeper
+                    try:
+                        for s in sorted(os.listdir(dir_path)):
+                            if s in SKIP:
+                                continue
+                            sub_path = os.path.join(dir_path, s)
+                            if os.path.isdir(sub_path) and _has_images(sub_path):
+                                result.append(os.path.join(d, s))
+                    except Exception:
+                        pass
+            return result
         except Exception as e:
             self.log.warning('Failed to scan collections in %s: %s', self.media_root, e)
             return []
@@ -2174,7 +2226,7 @@ class monitor_and_display:
                     continue
                 for fname in files:
                     path_rel = f"{collection}/{fname}"
-                    csv_rec = self._csv_by_file.get(fname, {})
+                    csv_rec = getattr(self, '_csv_by_path', {}).get(path_rel) or self._csv_by_file.get(fname, {})
                     artist = (csv_rec.get('artist_name') or '').strip()
                     if not artist:
                         artist = getattr(self, '_dir_to_artist', {}).get(collection, '').strip()
@@ -2292,6 +2344,7 @@ class monitor_and_display:
                 try:
                     # Build collection label options; prefer collection_name over artist_name when present
                     pairs = set()
+                    csv_dirs = set()
                     for row in self._csv_by_file.values():
                         an = (row.get('artist_name') or '').strip()
                         cn = (row.get('collection_name') or '').strip()
@@ -2304,6 +2357,14 @@ class monitor_and_display:
                                     'including in options anyway (dir may not be synced yet)', label, dn
                                 )
                             pairs.add(label.replace('_', ' '))
+                            csv_dirs.add(dn)
+                    # Always merge in any on-disk folders not covered by the CSV so
+                    # collections without a CSV entry still appear in the dropdown.
+                    # Use only the basename (leaf) as the display label so subdir collections
+                    # like "Artists/Kelly_Burns" show as "Kelly Burns", not the full path.
+                    for d in self._scan_collections():
+                        if d not in csv_dirs:
+                            pairs.add(os.path.basename(d).replace('_', ' '))
                     opts = sorted(pairs)
                     if not opts:
                         # Fallback to folders if CSV produced nothing usable
@@ -2313,8 +2374,8 @@ class monitor_and_display:
                         )
                         opts = self._scan_collections()
                     else:
-                        self.log.info('Publishing %d collections from CSV', len(opts))
-                        self.log.debug('Publishing collections from CSV (labels): %s', opts)
+                        self.log.info('Publishing %d collections from CSV+scan', len(opts))
+                        self.log.debug('Publishing collections from CSV+scan: %s', opts)
                 except Exception as e:
                     self.log.warning('Failed to derive collection label options from CSV; falling back to folders: %s', e)
                     opts = self._scan_collections()
@@ -2716,6 +2777,14 @@ class monitor_and_display:
             has_sources = bool(os.environ.get('SAMSUNG_TV_ART_COLLECTIONS')) or os.path.isfile('/data/collections.list')
             if not has_sources:
                 self.log.info('settings/sync_collections: no git sources configured; reseeding from local files only')
+                # Refresh the collections dropdown even when there are no git sources — the
+                # user may have added/removed folders in the media root since last startup.
+                try:
+                    self._publish_collections_state()
+                    self._publish_selected_collections_state()
+                    self._publish_settings_state()
+                except Exception:
+                    pass
             else:
                 fetch_ok = True
                 try:
@@ -2812,6 +2881,7 @@ class monitor_and_display:
                 reader = csv.DictReader(f)
                 self._csv_headers = list(reader.fieldnames or [])
                 self._csv_by_file = {}
+                self._csv_by_path = {}
                 # Rebuild artist<->dir maps
                 self._artist_to_dir = {}
                 self._dir_to_artist = {}
@@ -2819,6 +2889,9 @@ class monitor_and_display:
                     key = (row.get('artwork_file') or '').strip()
                     if key:
                         self._csv_by_file[key] = row
+                        dn = (row.get('artwork_dir') or '').strip()
+                        if dn:
+                            self._csv_by_path[f"{dn}/{key}"] = row
                     # Build bidirectional mapping when columns exist
                     try:
                         an = (row.get('artist_name') or '').strip()
@@ -2993,7 +3066,9 @@ class monitor_and_display:
                 rel_path = rec.get('path_rel')
                 if rel_path:
                     parts = os.path.normpath(rel_path).split(os.sep)
-                    if parts:
+                    if len(parts) > 1:
+                        collection = os.path.join(*parts[:-1])
+                    elif parts:
                         collection = parts[0]
             except Exception:
                 collection = None

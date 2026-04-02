@@ -20,6 +20,20 @@ Usage:
 
 REQUIRED_HEADERS = ["artwork_file", "artwork_dir"]
 
+IMAGE_EXT = {'.jpg', '.jpeg', '.png', '.bmp', '.tif'}
+
+
+def dir_has_images(path: str) -> bool:
+    """Return True if path contains at least one image file directly."""
+    try:
+        return any(
+            os.path.isfile(os.path.join(path, f))
+            and os.path.splitext(f)[1].lower() in IMAGE_EXT
+            for f in os.listdir(path)
+        )
+    except Exception:
+        return False
+
 
 def find_first_csv(path: str) -> Optional[str]:
     try:
@@ -80,25 +94,38 @@ def main():
     subdirs = [d for d in os.listdir(root) if os.path.isdir(os.path.join(root, d))]
     subdirs.sort()
 
-    for d in subdirs:
-        dir_path = os.path.join(root, d)
+    def _process_collection(dir_path: str, artwork_dir: str):
+        """Load rows from a collection directory and append to all_rows."""
         csv_path = find_first_csv(dir_path)
         if not csv_path:
-            # No CSV in this directory; skip silently
-            continue
+            return
         rows = load_rows(csv_path)
         for row in rows:
             file_name = ensure_artwork_file(row)
             if not file_name:
-                # Skip rows without a filename indicator
                 continue
-            merged = dict(row)  # copy
+            merged = dict(row)
             merged["artwork_file"] = file_name
-            merged["artwork_dir"] = d
-            # Track headers
+            merged["artwork_dir"] = artwork_dir
             for k in merged.keys():
                 header_set.add(k)
             all_rows.append(merged)
+
+    for d in subdirs:
+        dir_path = os.path.join(root, d)
+        if dir_has_images(dir_path):
+            # Flat collection: images live directly in this directory
+            _process_collection(dir_path, d)
+        else:
+            # Possibly a multi-collection repo: look one level deeper
+            try:
+                inner = sorted([s for s in os.listdir(dir_path) if os.path.isdir(os.path.join(dir_path, s))])
+            except Exception:
+                inner = []
+            for s in inner:
+                sub_path = os.path.join(dir_path, s)
+                if dir_has_images(sub_path):
+                    _process_collection(sub_path, os.path.join(d, s))
 
     # Ensure required headers exist and stable order: required first, then others alpha-sorted
     other_headers = sorted([h for h in header_set if h not in REQUIRED_HEADERS])
