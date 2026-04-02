@@ -2330,6 +2330,7 @@ class monitor_and_display:
                 try:
                     # Build collection label options; prefer collection_name over artist_name when present
                     pairs = set()
+                    csv_dirs = set()
                     for row in self._csv_by_file.values():
                         an = (row.get('artist_name') or '').strip()
                         cn = (row.get('collection_name') or '').strip()
@@ -2342,6 +2343,12 @@ class monitor_and_display:
                                     'including in options anyway (dir may not be synced yet)', label, dn
                                 )
                             pairs.add(label.replace('_', ' '))
+                            csv_dirs.add(dn)
+                    # Always merge in any on-disk folders not covered by the CSV so
+                    # collections without a CSV entry still appear in the dropdown.
+                    for d in self._scan_collections():
+                        if d not in csv_dirs:
+                            pairs.add(d.replace('_', ' '))
                     opts = sorted(pairs)
                     if not opts:
                         # Fallback to folders if CSV produced nothing usable
@@ -2351,8 +2358,8 @@ class monitor_and_display:
                         )
                         opts = self._scan_collections()
                     else:
-                        self.log.info('Publishing %d collections from CSV', len(opts))
-                        self.log.debug('Publishing collections from CSV (labels): %s', opts)
+                        self.log.info('Publishing %d collections from CSV+scan', len(opts))
+                        self.log.debug('Publishing collections from CSV+scan: %s', opts)
                 except Exception as e:
                     self.log.warning('Failed to derive collection label options from CSV; falling back to folders: %s', e)
                     opts = self._scan_collections()
