@@ -82,8 +82,8 @@ try:
 except Exception:
     HAVE_PIL = False
 
-# from samsungtvws.async_art import SamsungTVAsyncArt  # Moved inside class
-# from samsungtvws import __version__  # Not used
+# from samsungframetv.async_art import SamsungTVAsyncArt  # Moved inside class
+# from samsungframetv import __version__  # Not used
 
 try:
     import paho.mqtt.client as mqtt  # type: ignore
@@ -523,7 +523,11 @@ class monitor_and_display:
     def _create_tv_connection(self):
         """Create TV connection object. May raise if TV is unreachable."""
         import socket
-        from samsungtvws.async_art import SamsungTVAsyncArt
+        try:
+            from samsungframetv.async_art import SamsungTVAsyncArt
+        except ImportError:
+            # Images built before the upstream rename (library < 4.0.0) ship it as samsungtvws
+            from samsungtvws.async_art import SamsungTVAsyncArt
         device_name = os.environ.get('SAMSUNG_TV_ART_DEVICE_NAME') or socket.gethostname() or 'SamsungTvRemote'
         # Port 8002 is the SSL WebSocket (default for most models). Some Tizen 9.0
         # firmwares (Frame 2024+) filter 8002 and require the plain port 8001.
@@ -4001,6 +4005,20 @@ class monitor_and_display:
         await self.initialize()
         while True:
             if not await self.safe_in_artmode():
+                # Distinguish "TV connection object is missing/dead" from a genuine
+                # "TV reachable but art mode off". The former needs a reconnect; without
+                # this the loop would spin forever calling art API methods on a None/dead
+                # connection (see issue #11: 'NoneType' object has no attribute 'get_artmode').
+                if self.tv is None or not self.tv.is_alive():
+                    self.log.warning('TV connection unavailable; attempting reconnect (failure %d)', self.consecutive_failures)
+                    self._not_in_artmode_logged = False
+                    if await self.reconnect_tv():
+                        self.log.info('TV connection restored; resuming monitoring')
+                        self.consecutive_failures = 0
+                        continue
+                    # Reconnect failed — back off (capped) before trying again.
+                    await asyncio.sleep(self.get_backoff_delay())
+                    continue
                 backoff_delay = self.artmode_refresh_seconds or 1
                 if not self._not_in_artmode_logged:
                     self.log.info('TV is not in art mode')

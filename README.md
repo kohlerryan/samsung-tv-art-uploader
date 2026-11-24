@@ -12,7 +12,7 @@ Built on top of [NickWaterton/samsung-tv-ws-api](https://github.com/NickWaterton
 
 > **Upgrading from v0.1.x?** See the [v0.2.0 release notes](https://github.com/kohlerryan/samsung-tv-art-uploader/releases/tag/v0.2.0) for breaking changes and what's new.
 
-> **Upgrading from v0.2.x or v0.3.x?** See the [v0.4.7 release notes](https://github.com/kohlerryan/samsung-tv-art-uploader/releases/tag/v0.4.7) for what's new.
+> **Upgrading from v0.2.x or v0.3.x?** See the [v0.4.8 release notes](https://github.com/kohlerryan/samsung-tv-art-uploader/releases/tag/v0.4.8) for what's new.
 
 ## Features
 
@@ -330,7 +330,7 @@ When `SAMSUNG_TV_ART_LOCAL_WEB=true`, a web interface is available at `http://sa
 - **Collections** tab — select which collections are active and trigger a refresh
 - **Slideshow** tab — browse available images in per-collection carousels (S/M/L size). **In a collection carousel, single-click a thumbnail to open the large preview modal** (where you can pick the matte type and color); the corner checkmark adds or removes the image from the selection. **In the Selected overview, double-click a thumbnail to open the preview** (single-click is reserved for drag-start) and **drag thumbnails to control sequential playback order** (numbered badges show current order). Shuffle for a preview before committing, and manage named **Saved Selections** that sync across all clients via MQTT. A small status badge above the controls indicates pending changes: **● Preview** (amber) when a Shuffle preview is loaded but not applied, **● Modified** (blue) when your selection differs from what's currently on the TV
 - **Settings** tab — adjust MQTT/TV connection settings without restarting the container; includes a **Preload thumbnails** toggle (off by default) that eagerly fetches all slideshow images instead of loading them as you scroll. Action buttons are automatically disabled (with an explanatory message) when the TV is not in Art Mode, and show in-progress text while a command is pending
-- **Now Showing metadata** — the artwork info section (artist, title, description) scrolls when content overflows; a soft fade at the bottom of the section indicates more content is available below
+- **Now Showing metadata** — the artwork and its info section (artist, title, description) scroll together as one panel when they don't fit the window
 
 ## Home Assistant card
 

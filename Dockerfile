@@ -6,7 +6,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates git avahi-daemon avahi-utils dbus \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir git+https://github.com/NickWaterton/samsung-tv-ws-api.git pillow paho-mqtt
+RUN pip install --no-cache-dir samsungframetv==4.1.4 pillow paho-mqtt
 
 WORKDIR /app
 COPY start.sh /app/start.sh
