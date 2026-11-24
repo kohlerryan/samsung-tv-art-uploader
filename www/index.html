@@ -76,11 +76,11 @@
     .title { font-size: 1.1em; letter-spacing: .5px; line-height: 1.3; }
     .title .year { font-size: .9em; color: rgba(255,255,255,.7); }
     .line { font-size: .9em; color: rgba(255,255,255,.7); line-height: 1.4; margin-top: 4px; }
-    .bg { width: 100%; border-radius: 8px; background-color: #0d0c0b; overflow: hidden; border: 1px solid #3a2f2a; }
+    .bg { width: 100%; box-sizing: border-box; border-radius: 8px; background-color: #0d0c0b; overflow: hidden; border: 1px solid #3a2f2a; }
     .bg img { width: 100%; height: auto; display: block; border-radius: 8px; }
     #refresh-log { margin-top: 10px; font-size: 0.85em; line-height: 1.6; max-height: 220px; overflow-y: auto; }
-    /* Now Playing layout: flex column filling the full tab-content height */
-    #viewNowPlaying { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+    /* Now Playing layout: flex column filling the full tab-content height; artwork and text scroll together */
+    #viewNowPlaying { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; }
     #viewNowPlaying .bg   { order: 1; flex-shrink: 0; }
     #viewNowPlaying .info-wrap { order: 2; margin-top: 12px; }
     #viewNowPlaying #refresh-log { order: 3; flex-shrink: 0; }
@@ -88,10 +88,9 @@
     #viewNowPlaying.standby-mode .info-wrap { order: 1; margin-top: 0; flex: 0 0 auto; }
     #viewNowPlaying.standby-mode .info { height: auto; color: white; }
     #viewNowPlaying.standby-mode .bg   { order: 2; margin-top: 10px; flex-shrink: 0; }
-    #viewNowPlaying.standby-mode #refresh-log { order: 3; flex: 1; min-height: 0; max-height: none; overflow-y: auto; margin-top: 6px; }
-    /* Info section: .info-wrap is the flex child that takes remaining space; .info scrolls */
-    .info-wrap { flex: 1; min-height: 0; }
-    .info { height: 100%; overflow-y: auto; }
+    #viewNowPlaying.standby-mode #refresh-log { order: 3; flex: 1; min-height: 160px; max-height: none; overflow-y: auto; margin-top: 6px; }
+    /* Info section keeps its natural height; #viewNowPlaying is the scroller */
+    .info-wrap { flex-shrink: 0; }
 
     /* Tabs styled like folder (pentaflex) tabs */
     .tabbar { display: flex; gap: 6px; margin: 0 0 0 12px; align-items: flex-end; }
@@ -683,7 +682,7 @@
       </div>
       <div class="card-footer">
         <a class="bmc-link" href="https://buymeacoffee.com/kohlerryan" target="_blank" rel="noopener noreferrer">☕ Buy me a coffee</a>
-        <span class="version-tag">v0.4.8-beta.1</span>
+        <span class="version-tag">v0.4.8-beta.2</span>
       </div>
     </div>
   </div>
@@ -1415,6 +1414,7 @@
         `;
       }
       $info.innerHTML = t;
+      if ($np) $np.scrollTop = 0;
       // Generation counter: prevents a stale img.onload from overwriting a later setInfo call
       // (e.g. TV leaves art mode — $bg is cleared — then old async load fires and puts image back)
       setInfo._gen = (setInfo._gen || 0) + 1;
