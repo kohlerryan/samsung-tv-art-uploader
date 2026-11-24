@@ -12,7 +12,7 @@ Built on top of [NickWaterton/samsung-tv-ws-api](https://github.com/NickWaterton
 
 > **Upgrading from v0.1.x?** See the [v0.2.0 release notes](https://github.com/kohlerryan/samsung-tv-art-uploader/releases/tag/v0.2.0) for breaking changes and what's new.
 
-> **Upgrading from v0.2.x or v0.3.x?** See the [v0.4.8 release notes](https://github.com/kohlerryan/samsung-tv-art-uploader/releases/tag/v0.4.8) for what's new.
+> **Upgrading from v0.2.x or v0.3.x?** See the [v0.4.9 release notes](https://github.com/kohlerryan/samsung-tv-art-uploader/releases/tag/v0.4.9) for what's new.
 
 ## Features
 
@@ -418,6 +418,8 @@ samsung-tv-art/
 │   ├── fetch_collections.sh     — git clone/pull collection repos at runtime
 │   ├── aggregate_csv.py         — merges per-collection CSVs into a single artwork_data.csv
 │   └── bake_addons.sh           — build-time alternative to fetch_collections.sh
+├── tests/
+│   └── test_standby.py    — standby content-id checks against a fake TV (`python -m unittest discover -s tests`)
 ├── www/
 │   └── index.html         — web UI source (baked into container image)
 ├── examples/
