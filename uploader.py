@@ -849,7 +849,8 @@ class monitor_and_display:
             # still valid on the TV. Re-persist it after the cache wipe so standby
             # dedup survives — otherwise the id written by ensure_standby_selected()
             # (which runs just before cleanup) is lost and standby is re-uploaded on
-            # every restart.
+            # every restart. An id without an image_date is not written (see
+            # _cache_standby_content_id), so an unverifiable id can't be carried forward.
             if self.standby_content_id:
                 self._cache_standby_content_id(self.standby_content_id, self.standby_image_date)
         except Exception as e:
@@ -858,10 +859,12 @@ class monitor_and_display:
     async def ensure_standby_selected(self):
         """Upload and select standby image if present.
         Idempotent: skips the upload when the standby is already active in this session,
-        but first verifies the cached standby content_id still exists on the TV. The Frame
-        can drop/renumber MY_F#### ids (purge, reboot, content-id reuse), which would leave
-        a stale id that now resolves to a random leftover artwork; when that happens we clear
-        the id and re-upload a fresh standby so 'standby' always maps to standby.png.
+        but first verifies that the TV still lists the cached standby content_id with the
+        image_date recorded when it was uploaded. The Frame can drop/renumber MY_F#### ids
+        (purge, reboot, content-id reuse), which would leave a stale id that now resolves to
+        a random leftover artwork; when that happens — or when no image_date was recorded,
+        so the id can't be verified at all — we clear the id and re-upload a fresh standby
+        so 'standby' always maps to standby.png.
         """
         if not self.standby:
             return
@@ -877,25 +880,35 @@ class monitor_and_display:
             # Validate the cached id against the TV's live My-Collection list. Match on
             # both content_id AND image_date: the Frame can free and later reuse a
             # MY_F#### id for a different upload, so a present id alone isn't proof it's
-            # still our standby. Only invalidate on a definitive mismatch — a None list
-            # means the query failed and we must not blow away a still-valid id.
-            entries = await self.get_tv_content_entries('MY-C0002')
-            if entries is not None:
+            # still our standby. The id is trusted only when the TV lists it with exactly
+            # the image_date recorded at upload.
+            if not self.standby_image_date:
+                # Nothing to compare against (cache written before the date was stored, or
+                # the TV never reported one), so the id can't be verified whatever the TV
+                # says. Re-uploading one image is cheaper than showing the wrong one.
+                reason = 'no image_date was stored with it, so it cannot be verified as the standby image'
+            else:
+                entries = await self.get_tv_content_entries('MY-C0002')
+                if entries is None:
+                    # The query failed; that says nothing about the id, so don't blow
+                    # away a still-valid one.
+                    self.log.debug('Standby id %s could not be validated (TV query failed); skipping re-upload', self.standby_content_id)
+                    return
                 match = next((e for e in entries if e.get('content_id') == self.standby_content_id), None)
-                reused = bool(match and self.standby_image_date and match.get('image_date')
-                              and match.get('image_date') != self.standby_image_date)
-                if match is None or reused:
-                    reason = 'content-id reused by a different image' if reused else 'no longer on the TV'
-                    self.log.warning('Cached standby id %s is stale (%s) — re-uploading standby', self.standby_content_id, reason)
-                    self.standby_content_id = None
-                    self.standby_image_date = None
-                    self._cache_standby_content_id(None, None)
+                if match is None:
+                    reason = 'no longer on the TV'
+                elif match.get('image_date') != self.standby_image_date:
+                    reason = 'content-id reused by a different image: stored image_date %s, TV reports %s' % (
+                        self.standby_image_date, match.get('image_date'))
                 else:
                     self.log.debug('Standby already active as %s; skipping re-upload', self.standby_content_id)
                     return
-            else:
-                self.log.debug('Standby id %s could not be validated (TV query failed); skipping re-upload', self.standby_content_id)
-                return
+            # Dropping the id also stops cleanup_old_uploads() protecting whatever image
+            # holds it now.
+            self.log.warning('Cached standby id %s is stale (%s) — rejecting it and re-uploading standby', self.standby_content_id, reason)
+            self.standby_content_id = None
+            self.standby_image_date = None
+            self._cache_standby_content_id(None, None)
         try:
             file_data, file_type = self.read_file(standby_path)
             if file_data and self.tv.art_mode:
@@ -908,9 +921,14 @@ class monitor_and_display:
                 content_id = await self._upload_to_tv(file_data, file_type, self.matte)
                 if content_id:
                     self.standby_content_id = content_id
-                    # Capture the TV-assigned image_date so a later restart can tell this
-                    # exact upload apart from a reused content_id.
+                    # Capture the image_date the TV lists for this upload so a later restart
+                    # can tell this exact upload apart from a reused content_id.
                     self.standby_image_date = await self._get_standby_image_date(content_id)
+                    if not self.standby_image_date:
+                        self.log.warning(
+                            'TV did not report an image_date for the new standby %s after %d attempts — '
+                            'not caching its id; standby will be re-uploaded the next time it is validated',
+                            content_id, self._STANDBY_DATE_ATTEMPTS)
                     self._cache_standby_content_id(content_id, self.standby_image_date)
                     await self.tv.select_image(content_id)
                     # Publish standby via MQTT if enabled
@@ -1015,6 +1033,10 @@ class monitor_and_display:
             return None, None
 
     def _cache_standby_content_id(self, content_id, image_date=None):
+        # The id is only verifiable together with its image_date, so persist the pair or
+        # nothing: a lone id would be indistinguishable from a reused one on the next start.
+        if not image_date:
+            content_id = None
         try:
             self.load_cache()
             self.cache['_standby_content_id'] = content_id
@@ -1293,13 +1315,24 @@ class monitor_and_display:
             self.log.warning('failed to get contents from TV: %s', e)
             return None
 
+    _STANDBY_DATE_ATTEMPTS = 4
+    _STANDBY_DATE_RETRY_SECONDS = 2
+
     async def _get_standby_image_date(self, content_id):
-        '''Return the TV-assigned image_date for content_id in My Photos, or None.'''
-        entries = await self.get_tv_content_entries('MY-C0002')
-        if entries:
-            match = next((e for e in entries if e.get('content_id') == content_id), None)
-            if match:
-                return match.get('image_date')
+        '''Return the image_date the TV lists for content_id in My Photos, or None.
+
+        Called right after an upload, when the TV's list may not include the new image
+        yet or the query may fail, so it retries briefly before giving up.
+        '''
+        for attempt in range(1, self._STANDBY_DATE_ATTEMPTS + 1):
+            entries = await self.get_tv_content_entries('MY-C0002')
+            match = next((e for e in entries or [] if e.get('content_id') == content_id), None)
+            image_date = match.get('image_date') if match else None
+            if image_date:
+                return image_date
+            if attempt < self._STANDBY_DATE_ATTEMPTS:
+                self.log.debug('No image_date for %s yet (attempt %d/%d); retrying', content_id, attempt, self._STANDBY_DATE_ATTEMPTS)
+                await asyncio.sleep(self._STANDBY_DATE_RETRY_SECONDS)
         return None
 
     def get_folder_files(self):

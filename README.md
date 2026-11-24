@@ -418,6 +418,8 @@ samsung-tv-art/
 │   ├── fetch_collections.sh     — git clone/pull collection repos at runtime
 │   ├── aggregate_csv.py         — merges per-collection CSVs into a single artwork_data.csv
 │   └── bake_addons.sh           — build-time alternative to fetch_collections.sh
+├── tests/
+│   └── test_standby.py    — standby content-id checks against a fake TV (`python -m unittest discover -s tests`)
 ├── www/
 │   └── index.html         — web UI source (baked into container image)
 ├── examples/
